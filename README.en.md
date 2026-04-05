@@ -47,9 +47,35 @@ If local configuration is incomplete, the runtime can also generate `.env` direc
 
 3. Describe requests directly in natural language instead of manually assembling script commands. For example: "Which assets can this user access in the Default organization?", "Show me yesterday's usage", or "Show the details of this permission rule."
 
-4. Add context based on the returned result. If the result shows `candidate_orgs`, `switchable_orgs`, candidate objects, or a missing time range, follow the prompt and provide the organization, object name, platform, or time window. When organization selection is mandatory, the response also includes `reason_code`, `user_message`, `action_hint`, and `candidate_org_count` so the next step is explicit.
+4. Add context based on the returned result. If the result shows `candidate_orgs`, `switchable_orgs`, candidate objects, or a missing time range, follow the prompt and provide the organization, object name, platform, or time window. When organization selection is mandatory, the response also includes `reason_code`, `user_message`, `action_hint`, `suggested_commands`, and `candidate_org_count` so the next step is explicit.
 
 You do not need to remember specific execution commands. This skill performs preflight first, then routes to the formal entrypoint automatically, and prompts for organization, object, or time-range details only when needed.
+
+## Manual CLI Path
+
+If you want to run the formal entrypoints manually, use parameters in this order:
+
+1. Prefer explicit arguments such as `--org-name`, `--name`, `--days`, `--user`, and `--limit`
+2. Use repeated `--filter key=value` only for a few advanced fields
+3. Keep `--filters '{"key":"value"}'` only for backward compatibility
+
+Recommended style:
+
+```bash
+python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-name Default
+python3 scripts/jumpserver_api/jms_diagnose.py user-assets --org-name Default --username gusiqing
+python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --name Default --limit 5
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --days 7 --user gusiqing --limit 20
+python3 scripts/jumpserver_api/jms_diagnose.py inspect --capability hot-assets-ranking --days 30 --top 10 --limit 10
+python3 scripts/jumpserver_api/jms_diagnose.py reports --report-type account-statistic --days 30
+```
+
+Compatibility style:
+
+```bash
+python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --filters '{"name":"Default","limit":5}'
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --filter user=gusiqing --filter days=7 --filter limit=20
+```
 
 ## Environment Variables
 
@@ -130,6 +156,12 @@ Time expressions are normalized into explicit time windows first:
 - "last week" -> previous natural week, Monday `00:00:00 ~ Sunday 23:59:59`
 - "this month" -> the first day of the current month `00:00:00` to the current date or month end `23:59:59`
 
+Quick reading guide:
+
+- `a specific day` is only a placeholder concept; users can say `yesterday`, `20260310`, `2026-03-10`, `2026/03/10`, or `March 10`.
+- `a time range` is also a placeholder concept; users can say `last week`, `this month`, or a concrete range such as `2026-03-10 to 2026-03-24`.
+- Natural-language time expressions are normalized first, and the formal entrypoint ultimately uses `--date`, `--period`, or `--date-from/--date-to`.
+
 Reports are always written to `reports/JumpServer-YYYY-MM-DD.html`. If the request includes command-audit fields, the report applies the predefined command-storage aggregation rules automatically, so users do not need to choose internal collection logic manually.
 
 ## Organization Selection and Blocking Rules
@@ -154,6 +186,7 @@ Organization-blocking responses also include these structured fields:
 - `reason_code=organization_selection_required`
 - `user_message`, which explicitly says an organization must be chosen before continuing
 - `action_hint`, which provides the safe next command template
+- `suggested_commands`, which provides 1-3 copyable follow-up commands
 - `candidate_org_count`, which shows how many accessible organization candidates are available
 - `org_selection_policy=required_before_query_when_multiple_accessible_orgs`
 

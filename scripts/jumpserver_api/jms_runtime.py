@@ -64,9 +64,16 @@ ORG_SELECTION_NEXT_STEP = (
 )
 ORG_SELECTION_REQUIRED_REASON_CODE = "organization_selection_required"
 ORG_SELECTION_POLICY = "required_before_query_when_multiple_accessible_orgs"
+INVALID_JSON_PAYLOAD_REASON_CODE = "invalid_json_payload"
+INVALID_FILTER_ASSIGNMENT_REASON_CODE = "invalid_filter_assignment"
+CONFIRMATION_REQUIRED_REASON_CODE = "confirmation_required"
 DEFAULT_TIMEOUT = 30
 _GLOBAL_ORG_PROBE_ATTEMPTED = False
 _GLOBAL_ORG_PROBE_RESULT: dict[str, Any] | None = None
+
+
+class CLIHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
+    """Argparse formatter that keeps example newlines while still showing defaults."""
 
 
 class CLIError(RuntimeError):
@@ -100,6 +107,86 @@ def _strip_wrapping_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def has_cli_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip() != ""
+    return True
+
+
+def build_cli_guidance_payload(
+    reason_code: str,
+    *,
+    user_message: str,
+    action_hint: str | None = None,
+    suggested_commands: list[str] | None = None,
+    **details: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "reason_code": reason_code,
+        "user_message": user_message,
+        "action_hint": action_hint,
+        "suggested_commands": [item for item in (suggested_commands or []) if str(item or "").strip()],
+    }
+    for key, value in details.items():
+        if value is not None:
+            payload[key] = value
+    return payload
+
+
+def _parse_cli_scalar(value: str) -> Any:
+    text = str(value or "").strip()
+    lowered = text.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    if lowered in {"null", "none"}:
+        return None
+    if re.fullmatch(r"-?(?:0|[1-9]\d*)", text):
+        return int(text)
+    if re.fullmatch(r"-?(?:0|[1-9]\d*)\.\d+", text):
+        return float(text)
+    return text
+
+
+def parse_filter_assignments(
+    values: list[str] | None,
+    *,
+    usage_examples: list[str] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for raw_item in values or []:
+        item = str(raw_item or "").strip()
+        if not item or "=" not in item:
+            raise CLIError(
+                "无法解析 --filter 参数。",
+                payload=build_cli_guidance_payload(
+                    INVALID_FILTER_ASSIGNMENT_REASON_CODE,
+                    user_message="`--filter` 需要使用 `key=value` 形式，例如 `--filter limit=5`。",
+                    action_hint="优先使用显式参数；如果需要补充高级筛选，再重复传入 `--filter key=value`。",
+                    suggested_commands=usage_examples,
+                    invalid_filter=item or None,
+                ),
+            )
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise CLIError(
+                "无法解析 --filter 参数。",
+                payload=build_cli_guidance_payload(
+                    INVALID_FILTER_ASSIGNMENT_REASON_CODE,
+                    user_message="`--filter` 的 key 不能为空，例如 `--filter name=Default`。",
+                    action_hint="请把 `=` 左侧改成实际字段名。",
+                    suggested_commands=usage_examples,
+                    invalid_filter=item,
+                ),
+            )
+        payload[key] = _parse_cli_scalar(value)
+    return payload
 
 
 def read_local_env(path: Path | None = None) -> dict[str, str]:
@@ -238,22 +325,95 @@ def get_config_status(path: Path | None = None) -> dict[str, Any]:
     }
 
 
-def parse_json_arg(value: str | None, *, default: dict[str, Any] | None = None) -> dict[str, Any]:
+def parse_json_arg(
+    value: str | None,
+    *,
+    default: dict[str, Any] | None = None,
+    source: str = "--filters",
+    usage_examples: list[str] | None = None,
+) -> dict[str, Any]:
     if value in {None, ""}:
         return dict(default or {})
     try:
         payload = json.loads(value)
     except json.JSONDecodeError as exc:
-        raise CLIError("Invalid JSON payload: %s" % exc.msg) from exc
+        raise CLIError(
+            "无法解析 %s 参数。" % source,
+            payload=build_cli_guidance_payload(
+                INVALID_JSON_PAYLOAD_REASON_CODE,
+                user_message="%s 需要传入 JSON 对象字符串，例如 '{\"limit\": 5}'。" % source,
+                action_hint="优先改用显式参数或重复的 `--filter key=value`；如果继续使用 JSON，请检查引号、逗号和花括号。",
+                suggested_commands=usage_examples,
+                input_name=source,
+                parser_error=exc.msg,
+                raw_value=value,
+            ),
+        ) from exc
     if not isinstance(payload, dict):
-        raise CLIError("JSON payload must be an object.")
+        raise CLIError(
+            "%s 必须是 JSON 对象。" % source,
+            payload=build_cli_guidance_payload(
+                INVALID_JSON_PAYLOAD_REASON_CODE,
+                user_message="%s 需要传入 JSON 对象，而不是数组或普通字符串。" % source,
+                action_hint="请改成 `{\"key\": \"value\"}` 这种对象形式，或直接使用显式参数 / `--filter key=value`。",
+                suggested_commands=usage_examples,
+                input_name=source,
+                raw_value=value,
+            ),
+        )
     return payload
+
+
+def merge_filter_args(
+    args: argparse.Namespace,
+    *,
+    default: dict[str, Any] | None = None,
+    explicit_fields: dict[str, str] | list[str] | tuple[str, ...] = (),
+    usage_examples: list[str] | None = None,
+) -> dict[str, Any]:
+    filters = parse_json_arg(
+        getattr(args, "filters", None),
+        default=default,
+        source="--filters",
+        usage_examples=usage_examples,
+    )
+    filters.update(parse_filter_assignments(getattr(args, "filter", None), usage_examples=usage_examples))
+    if isinstance(explicit_fields, dict):
+        field_map = dict(explicit_fields)
+    else:
+        field_map = {field: field for field in explicit_fields}
+    for attr_name, filter_key in field_map.items():
+        if not hasattr(args, attr_name):
+            continue
+        value = getattr(args, attr_name)
+        if has_cli_value(value):
+            filters[filter_key] = value
+    return filters
+
+
+def add_filter_arguments(parser: argparse.ArgumentParser, *, include_legacy_json: bool = True) -> None:
+    parser.add_argument(
+        "--filter",
+        action="append",
+        metavar="KEY=VALUE",
+        help="推荐的高级补充筛选写法，可重复传入，例如 `--filter limit=5 --filter user=gusiqing`。",
+    )
+    if include_legacy_json:
+        parser.add_argument(
+            "--filters",
+            help="兼容模式的 JSON 对象字符串。推荐优先使用显式参数或重复的 `--filter key=value`。",
+        )
 
 
 def require_confirmation(args: argparse.Namespace) -> None:
     if not getattr(args, "confirm", False):
         raise CLIError(
-            "This action requires --confirm after the change preview is reviewed."
+            "当前操作需要显式确认。",
+            payload=build_cli_guidance_payload(
+                CONFIRMATION_REQUIRED_REASON_CODE,
+                user_message="这个命令会改写本地运行时配置，继续前必须追加 `--confirm`。",
+                action_hint="先查看当前返回的预览结果，确认无误后再重跑一次并加上 `--confirm`。",
+            ),
         )
 
 
@@ -430,6 +590,11 @@ def build_org_selection_required_payload(context: dict[str, Any]) -> dict[str, A
     candidate_orgs = context.get("candidate_orgs")
     if not isinstance(candidate_orgs, list):
         candidate_orgs = []
+    suggested_commands = [
+        "python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-id %s --confirm" % str(item.get("id") or "").strip()
+        for item in candidate_orgs[:3]
+        if str(item.get("id") or "").strip()
+    ]
     return {
         "selection_required": True,
         "candidate_orgs": candidate_orgs,
@@ -442,6 +607,7 @@ def build_org_selection_required_payload(context: dict[str, Any]) -> dict[str, A
             "请从 candidate_orgs 中选择 1 个 org_id，然后执行 %s。"
             % ORG_SELECTION_NEXT_STEP
         ),
+        "suggested_commands": suggested_commands,
         "org_selection_policy": ORG_SELECTION_POLICY,
         **org_context_output(context),
     }
@@ -540,7 +706,7 @@ def ensure_selected_org_context() -> dict[str, Any]:
     context = resolve_effective_org_context()
     if context["selection_required"]:
         raise CLIError(
-            "Organization selection is required: multiple accessible organizations were detected.",
+            "需要先选择组织后才能继续查询。",
             payload=build_org_selection_required_payload(context),
         )
     return context

@@ -5,6 +5,7 @@
 - 优先按“判断当前是首次全量还是后续轻量 -> 环境 -> 连通性 -> 组织 -> 对象解析 -> 能力查询”的顺序排查。
 - 环境与入口问题看 [runtime.md](runtime.md)；资源与标准流程看 [assets.md](assets.md)；治理和调查能力看 [capabilities.md](capabilities.md)。
 - 所有正式入口都在 `scripts/jumpserver_api/` 下，不使用 SDK 临时脚本路径。
+- 遇到阻塞或参数错误时，优先看返回里的 `reason_code`、`user_message`、`action_hint`、`suggested_commands`，不要只盯顶层 `error`。
 
 ## 报错速查
 
@@ -14,9 +15,10 @@
 | `No module named requests` / `Automatic dependency installation failed.` | 当前解释器环境缺依赖、pip 不可用、无网络，或自动安装失败 | 优先查看自动安装错误明细；必要时执行 `python3 -m pip install -r requirements.txt` |
 | `.env` 缺失，或 `JMS_API_URL is required.` | 本地配置未初始化，或地址变量没配置 | 先执行 `python3 scripts/jumpserver_api/jms_diagnose.py config-status --json` |
 | `API credential is required.` / 认证凭据缺失 | 未提供完整的 AK/SK 或用户名密码 | 补齐 `JMS_ACCESS_KEY_ID/JMS_ACCESS_KEY_SECRET` 或 `JMS_USERNAME/JMS_PASSWORD` 中至少一组 |
-| `Unable to determine the effective organization.` | 未选组织，且当前环境不能自动代选组织 | 先执行 `python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-id <org-id> --confirm` |
+| `需要先选择组织后才能继续查询。` / `reason_code=organization_selection_required` | 未选组织，且当前环境不能自动代选组织 | 先看 `candidate_orgs` 和 `suggested_commands`，再执行 `python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-id <org-id> --confirm` |
 | `Unknown capability` | `--capability` 拼写错误，或当前版本未实现 | 先执行 `... capabilities` 查看能力目录 |
-| `Invalid JSON payload` / `JSON payload must be an object.` | `--filters` 不是合法 JSON 对象 | 检查引号、逗号和花括号 |
+| `无法解析 --filters 参数。` / `--filters 必须是 JSON 对象。` | `--filters` 不是合法 JSON 对象 | 优先改用显式参数或重复的 `--filter key=value`；若继续用 JSON，再检查引号、逗号和花括号 |
+| `无法解析 --filter 参数。` | `--filter` 不是 `key=value` 形式 | 改成 `--filter name=Default` 这种写法 |
 | `Asset permission API is unavailable or not yet confirmed ...` | 当前环境未开放权限接口，或权限不足 | 记录为接口待确认，先做替代性只读验证 |
 | `object_does_not_exist` / `404` | ID 错误、组织错误或对象不存在 | 先重新 `list/get/resolve` |
 | “帮我创建/更新/删除/解锁/授权” 被拒绝 | 本仓库不提供对象或权限写操作 | 说明边界，并回到只读查询或能力分析路径 |
@@ -50,6 +52,7 @@
 |---|---|
 | 为标准流程写临时 SDK Python 文件 | 回到正式 `scripts/jumpserver_api/jms_*.py` |
 | 用模糊名称直接推断对象 | 先解析为精确对象或 ID |
+| 默认仍手写 `--filters '{"key":"value"}'` | 优先改用显式参数；高级场景再用 `--filter key=value` |
 | 查调查类问题却只调用单个 `list` 接口 | 优先用 `analyze --capability ...` |
 | 查治理类问题却手工拼接多个读取命令 | 优先用 `inspect --capability ...` |
 | 未指定时间范围就认定“没有历史数据” | 先显式传 `date_from/date_to` |

@@ -10,7 +10,8 @@
 - 若未指定 `JMS_ORG_ID`，运行时先读取当前环境全部可访问组织；默认不自动代选组织。
 - 只有当可访问组织集合恰好是 `{0002}` 或 `{0002,0004}` 时，运行时才会自动将 `0002` 写入 `.env` 并继续。
 - 即使 `.env` 中的 `JMS_ORG_ID` 已生效，查询结果也会回显当前仍可切换到哪些组织，并通过 `org_context_hint` 说明当前查询范围固定在哪个组织。
-- 除 `config-status`、`config-write`、`ping`、`select-org` 外，其余业务命令在未选组织时都会先停下；组织阻塞时会额外返回 `reason_code`、`user_message`、`action_hint`、`candidate_org_count` 等结构化提示字段。
+- 除 `config-status`、`config-write`、`ping`、`select-org` 外，其余业务命令在未选组织时都会先停下；组织阻塞时会额外返回 `reason_code`、`user_message`、`action_hint`、`suggested_commands`、`candidate_org_count` 等结构化提示字段。
+- 手工执行正式入口时，推荐优先使用显式参数和重复的 `--filter key=value`；`--filters '{"key":"value"}'` 仅兼容旧命令。
 
 ## 预检模式总览
 
@@ -102,6 +103,7 @@ python3 scripts/jumpserver_api/jms_diagnose.py ping
 - `reason_code=organization_selection_required`
 - `user_message`：明确要求先选择组织
 - `action_hint`：返回 `select-org --org-id <org-id> --confirm` 的安全命令模板
+- `suggested_commands`：返回 1 到 3 条可直接复制的后续命令
 - `candidate_org_count`：候选组织数量
 - `org_selection_policy=required_before_query_when_multiple_accessible_orgs`
 
@@ -112,6 +114,7 @@ python3 scripts/jumpserver_api/jms_diagnose.py ping
 | `python3 scripts/jumpserver_api/jms_diagnose.py config-status --json` | 查看当前本地配置状态 |
 | `python3 scripts/jumpserver_api/jms_diagnose.py config-write --payload '<json>' --confirm` | 生成或覆盖本地 `.env` |
 | `python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-id <org-id> --confirm` | 显式选择组织并写回 `JMS_ORG_ID` |
+| `python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-name <org-name>` | 先按组织名称预览切换范围，不写回 `.env` |
 | `python3 scripts/jumpserver_api/jms_query.py ...` | 对象查询、权限查询、审计查询的统一入口 |
 | `python3 scripts/jumpserver_api/jms_diagnose.py ...` | 连通性、解析、访问分析、设置/许可证/报表/工单/存储查询、巡检与治理分析 |
 | `python3 scripts/jumpserver_api/jms_report.py ...` | 模板化报告生成与契约检查 |

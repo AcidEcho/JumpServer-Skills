@@ -13,7 +13,7 @@
     ],
     "endpoints": [
       "/api/v1/terminal/commands/",
-      "/api/v1/terminal/commands/{pk}/"
+      "/api/v1/terminal/commands/?session_id=<session_id>"
     ],
     "scripts": [
       "scripts/jumpserver_api/jms_query.py",

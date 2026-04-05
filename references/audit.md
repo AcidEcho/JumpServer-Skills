@@ -2,36 +2,51 @@
 
 ## 快速概览
 
-- 开始前先到 [runtime.md](runtime.md) 判断本次是“首次全量校验”还是“后续轻量校验”。
 - 主入口：`python3 scripts/jumpserver_api/jms_query.py <subcommand> ...`
-- 支持子命令：`audit-list`、`audit-get`、`terminal-sessions`、`command-storage-hint`、`audit-analyze`、`capabilities`。
-- 调查分析类请求统一使用这份文档，无需额外 playbook。
-- 未选组织时，先通过 `python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-id <org-id> --confirm` 选择组织；只有 `{0002}` 或 `{0002,0004}` 环境会自动写入 `0002`。
-- `audit-list` 默认按当前时间窗自动翻页拉全量；显式传 `limit` / `offset` 时按分页结果返回。
-- 未传 `date_from/date_to` 时，`audit-list/audit-analyze/terminal-sessions` 默认查询最近 7 天。
-- 当环境存在多个 `command storage` 时，`command-record-query` 与 `high-risk-command-audit` 在普通查询场景下会优先使用默认 storage 或单个可用 storage 继续查询，并在结果里提示还可以切换到哪些 storage；只有在存在多个 storage 且无法推导默认 storage 时，才会阻塞并要求显式指定 `command_storage_id`。
-- 当 filters 显式传入 `command_storage_scope=all` 且未指定 `command_storage_id` 时，这两个能力会遍历全部可访问 command storage 并合并汇总结果；该模式优先用于报告/使用分析场景。
-- 命令审计在大时间窗下可能遇到存储侧 429 限流；优先缩小时间窗、分段查询，或先确认正确的 `command_storage_id`。
+- 常用子命令：`audit-list`、`audit-get`、`terminal-sessions`、`job-list`、`command-storage-hint`、`audit-analyze`、`capabilities`。
+- 页面型查询优先使用显式参数；低频页面字段再用 `--filter key=value`。
+- `audit-list` 和 `terminal-sessions` 未显式传 `limit/offset` 时会按当前时间窗拉全量；传了分页参数就按分页结果返回。
+- 查询型接口未显式给时间窗时默认最近 7 天；`--days` 只是输入快捷方式，不是最终下发给服务端的查询主参数。
+- 命令审计在多 `command storage` 环境下，普通查询优先沿用默认 storage；报告或汇总分析场景可显式传 `--command-storage-scope all` 汇总全部可访问 storage。
 
-## `audit-type` 对应场景
+## 页面同款直接查询
 
-| `audit-type` | 适用场景 | 备注 |
-|---|---|---|
-| `operate` | 资源变更、权限变更、配置操作 | 适合直接查操作日志 |
-| `login` | 登录成功、登录失败、锁定、认证异常 | 适合排查异常来源和失败登录 |
-| `session` | 审计侧会话记录 | 适合查访问行为与时长 |
-| `terminal-session` | terminal 侧在线/历史会话明细 | 适合查当前在线连接和会话结束状态 |
-| `ftp` | 文件上传、下载、SFTP 传输 | 适合文件传输审计 |
-| `command` | 会话中的命令记录 | 适合高危命令审计和命令关键字排查 |
+| 场景 | 推荐入口 | 当前显式参数 | 说明 |
+|---|---|---|---|
+| 操作日志 | `audit-list --audit-type operate` | `--search --user --action --resource-type` | `--search` 是页面搜索框；`--user` 会解析为页面显示值 `name(username)` |
+| 登录日志 | `audit-list --audit-type login` | `--search --username --ip --type --city --mfa --status` | `--username` 下发页面精确字段；`type` 只支持 `W/T/U` |
+| 改密日志 | `audit-list --audit-type password_change` | `--search --user --change-by --remote-addr` | `--user` 与 `--change-by` 都会解析为 `name(username)` |
+| 作业日志 | `audit-list --audit-type jobs` | `--search --creator-name --material` | `--creator-name` 解析后下发创建者显示名 |
+| 会话记录页面 | `audit-list --audit-type terminal-session` / `terminal-sessions` | `--search --user --account --asset --protocol --login-from --remote-addr --asset-id --order` | `terminal-sessions` 继续保留 `--view online/history` |
+| 审计侧会话 | `audit-list --audit-type session` | `--search --user --account --asset --protocol --login-from --remote-addr --asset-id --order` | 适合审计侧会话口径；需要页面同款在线/历史视图时优先 `terminal-sessions` |
+| 命令记录页面 | `audit-list --audit-type command` | `--search --command-storage-id --command-storage-scope --asset-id --order` | 这一轮只显式化已确认页面字段；低频字段继续走 `--filter` |
+| 文件传输日志 | `audit-list --audit-type ftp` | 时间、分页、`--search` | 页面型显式参数只保留已确认字段 |
+| 作业列表 | `job-list` | `--search --name --limit --offset` | 对应 `/api/v1/audits/jobs/` 页面 |
+
+补充规则：
+
+- 用户类字段优先接受 `username`、`name`、`name(username)`，唯一匹配后再转换成页面需要的显示值。
+- 账号类字段会转换成 `name(username)`；资产类字段会转换成 `name(ip)`。
+- `--search` 可与精确字段同时存在，最终按服务端 AND 语义组合。
+- 页面型命令不要把 `audit-list --audit-type login --user`、`terminal-sessions --source-ip`、泛化 `--keyword`、泛化 `--direction` 当成首选写法。
+
+## 查询型时间语义
+
+- 查询型接口中的 `--days` 会先换算成本地时间窗，再统一生成 `date_from/date_to` 请求参数；最终请求不再携带 `days`。
+- 显式传了 `--date-from/--date-to` 时，以显式时间窗为准。
+- `date_from=YYYY-MM-DD` 会补成本地当天 `00:00:00.000`。
+- `date_to=YYYY-MM-DD` 会补成本地当天 `23:59:59.999`。
+- 无时区字符串先按 skill 运行环境时区解释，再统一序列化为页面同款 UTC `...Z`。
+- 报表和 dashboard 不在这套规则里，仍保留原生 `days`。
 
 ## `audit-analyze --capability` 适用场景
 
 | 能力 | 适用问题 |
 |---|---|
-| `command-record-query` | 按用户/资产/关键字排查命令 |
+| `command-record-query` | 按用户 / 资产 / 命令关键字排查命令 |
 | `high-risk-command-audit` | 排查高危命令、拒绝命令 |
 | `session-record-query` | 查会话明细、协议、状态 |
-| `file-transfer-log-query` | 查文件上传/下载记录 |
+| `file-transfer-log-query` | 查文件上传 / 下载记录 |
 | `abnormal-hours-login-query` | 查异常时间段登录 |
 | `abnormal-source-ip-login-query` | 查异常来源 IP 登录 |
 | `failed-login-statistics` | 统计失败登录排行 |
@@ -44,69 +59,71 @@
 某用户某天连接过哪些机器：
 
 - 先解析用户，再优先 `audit-analyze --capability session-record-query`
+- 若用户已经被解析成 UUID，固定传 `filters.user_id`；`filters.user` 只保留显示名或用户名文本
 - 返回时区分 `session_count` 与去重后的 `assets`
 - 不要先用 `audit-list --audit-type session` 作为“是否有会话”的唯一依据
 
 ## 高频示例
 
-最近操作日志：
-
-```bash
-python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type operate --filters '{"limit":5}'
-```
-
-`terminal-sessions` 补充说明：
-
-- 传 `asset` 时，会先尝试把资产名解析为 `asset_id` 再请求 terminal session 接口。
-- 当前实现会自动去掉 terminal session 不稳定的 `days` 服务端参数，只保留本地时间窗换算后的 `date_from/date_to`。
-- 若按资产的服务端过滤没有命中，会自动退回到“拉宽列表后本地按资产过滤”，并在 `summary.filter_strategy` 标明 `local_asset_fallback`。
-- 每条记录都带 `asset_evidence`，可直接用于说明为什么判定该记录属于目标资产。
-- 如果目标会话发生在更早时间，请显式传 `days` 或 `date_from/date_to`。
-
 最近登录审计：
 
 ```bash
-python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type login --filters '{"limit":5}'
-python3 scripts/jumpserver_api/jms_query.py terminal-sessions --view online
-python3 scripts/jumpserver_api/jms_query.py terminal-sessions --view history --filters '{"limit":5}'
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type login --limit 5
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type login --days 30 --username 古思清(gusiqing) --status 1 --limit 5
+```
+
+最近操作日志：
+
+```bash
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type operate --days 30 --user gusiqing --action 创建 --resource-type 'User session' --limit 20
+```
+
+改密日志与作业日志：
+
+```bash
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type password_change --days 30 --user 杨天宏(tianhong.yang) --change-by 古思清(gusiqing) --remote-addr 121.225.130.254 --limit 20
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type jobs --days 30 --creator-name 古思清 --material 'shell:ls' --limit 20
+```
+
+会话记录与作业列表：
+
+```bash
+python3 scripts/jumpserver_api/jms_query.py terminal-sessions --view history --days 7 --user gusiqing --login-from WT --limit 10
+python3 scripts/jumpserver_api/jms_query.py audit-list --audit-type terminal-session --days 7 --asset demo-host --protocol ssh --limit 20
+python3 scripts/jumpserver_api/jms_query.py job-list --name 删除Windows用户 --limit 10
 ```
 
 某用户某天连接过哪些机器：
 
 ```bash
-python3 scripts/jumpserver_api/jms_diagnose.py resolve --resource user --name '齐经宇'
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --filters '{"user":"齐经宇","date_from":"2026-03-23 00:00:00","date_to":"2026-03-23 23:59:59","limit":200}'
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --user 齐经宇 --date-from '2026-03-23 00:00:00' --date-to '2026-03-23 23:59:59' --limit 200
 ```
 
 高危命令审计：
 
 ```bash
 python3 scripts/jumpserver_api/jms_query.py command-storage-hint
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability high-risk-command-audit --filters '{"date_from":"2026-03-01 00:00:00","date_to":"2026-03-20 23:59:59","command_storage_id":"<storage-id>"}'
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability high-risk-command-audit --date-from '2026-03-01 00:00:00' --date-to '2026-03-20 23:59:59' --command-storage-id '<storage-id>'
 ```
 
-文件传输审计：
+文件传输与命令记录分析：
 
 ```bash
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability file-transfer-log-query --filters '{"direction":"upload","date_from":"2026-03-01 00:00:00","date_to":"2026-03-20 23:59:59"}'
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability file-transfer-log-query --direction upload --date-from '2026-03-01 00:00:00' --date-to '2026-03-20 23:59:59'
+python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability command-record-query --date-from '2026-03-01 00:00:00' --date-to '2026-03-20 23:59:59' --command-storage-scope all
 ```
 
-命令记录查询（多 storage 环境会优先使用默认 storage，并提示可切换 storage）：
+## 统计口径与常见误区
 
-```bash
-python3 scripts/jumpserver_api/jms_query.py command-storage-hint
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability command-record-query --filters '{"date_from":"2026-03-01 00:00:00","date_to":"2026-03-20 23:59:59","command_storage_id":"<storage-id>"}'
-```
+- `session_count` 与去重后的 `assets` 是两套口径；前者回答“连了几次 / 有多少会话”，后者回答“连了哪些机器 / 有多少台机器”。
+- `top_users`、`top_assets`、ranking 一类排行榜默认可能是 Top N 或部分样本，排行榜不等于总量。
+- 若返回里有 `summary.total`，先把它当作权威总量；只有在榜单明确覆盖全量时，才允许用榜单求和去交叉验证。
+- 若榜单只是部分数据，必须明确写“根据已返回榜单/样本数据”，不能直接写成整体总数或全体用户数。
+- 当用户问“某天连接了哪些机器”时，必须从 `records` 中按用户提取并去重资产名称，不用 `top_assets` 代替明细。
+- 不要把单个用户的会话数说成总会话数，也不要把单个资产的访问次数说成总访问量。
 
-报告/使用分析场景汇总全部 command storage：
+## 排障提示
 
-```bash
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability command-record-query --filters '{"date_from":"2026-03-01 00:00:00","date_to":"2026-03-20 23:59:59","command_storage_scope":"all"}'
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability high-risk-command-audit --filters '{"date_from":"2026-03-01 00:00:00","date_to":"2026-03-20 23:59:59","command_storage_scope":"all"}'
-```
-
-可疑行为汇总：
-
-```bash
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability suspicious-operation-summary --filters '{"days":7,"user":"openclaw"}'
-```
+- `command` 审计记录里的 `id` 是 skill 生成的稳定 ID，后端原始瞬时行 ID 会保存在 `source_row_id` 里，仅用于排障观察。
+- 页面型查询结果里可能带 `data_source`、`filter_strategy` 或其他诊断字段，用于对照本次实际命中的端点和过滤方式。
+- 如果目标会话或命令发生在更早时间，请显式传 `--days` 或 `--date-from/--date-to`，不要直接把空结果解读成“没有记录”。

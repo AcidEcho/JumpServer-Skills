@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
+import hashlib
 import json
 import re
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from .jms_capabilities import CAPABILITY_BY_ID
 from .jms_runtime import (
     CLIError,
+    build_cli_guidance_payload,
     create_client,
     create_discovery,
     ensure_selected_org_context,
@@ -31,6 +33,55 @@ ROLE_BINDINGS_PATH = "/api/v1/rbac/role-bindings/"
 ORG_ROLE_BINDINGS_PATH = "/api/v1/rbac/org-role-bindings/"
 SYSTEM_ROLE_BINDINGS_PATH = "/api/v1/rbac/system-role-bindings/"
 ROLES_PATH = "/api/v1/rbac/roles/"
+LOGIN_LOGS_PATH = "/api/v1/audits/login-logs/"
+OPERATE_LOGS_PATH = "/api/v1/audits/operate-logs/"
+FTP_LOGS_PATH = "/api/v1/audits/ftp-logs/"
+JOB_LOGS_PATH = "/api/v1/audits/job-logs/"
+PASSWORD_CHANGE_LOGS_PATH = "/api/v1/audits/password-change-logs/"
+USER_SESSIONS_PATH = "/api/v1/audits/user-sessions/"
+REPORT_PATHS = {
+    "account-statistic": "/api/v1/reports/reports/account-statistic/",
+    "account-automation": "/api/v1/reports/reports/account-automation/",
+    "asset-statistic": "/api/v1/reports/reports/asset-statistic/",
+    "asset-activity": "/api/v1/reports/reports/asset-activity/",
+    "users": "/api/v1/reports/reports/users/",
+    "user-change-password": "/api/v1/reports/reports/user-change-password/",
+    "pam-dashboard": "/api/v1/accounts/pam-dashboard/",
+    "change-secret-dashboard": "/api/v1/accounts/change-secret-dashboard/",
+}
+REPORT_TYPES_WITH_NATIVE_DAYS = {
+    "account-statistic",
+    "account-automation",
+    "asset-statistic",
+    "asset-activity",
+    "users",
+    "user-change-password",
+    "change-secret-dashboard",
+}
+PAM_DASHBOARD_FLAG_FIELDS = (
+    "total_long_time_no_login_accounts",
+    "total_new_found_accounts",
+    "total_groups_changed_accounts",
+    "total_sudoers_changed_accounts",
+    "total_authorized_keys_changed_accounts",
+    "total_account_deleted_accounts",
+    "total_password_expired_accounts",
+    "total_long_time_password_accounts",
+    "total_weak_password_accounts",
+    "total_leaked_password_accounts",
+    "total_repeated_password_accounts",
+)
+CHANGE_SECRET_DASHBOARD_FLAG_FIELDS = ("daily_success_and_failure_metrics",)
+QUERY_TIME_WINDOW_PATHS = {
+    LOGIN_LOGS_PATH,
+    OPERATE_LOGS_PATH,
+    FTP_LOGS_PATH,
+    JOB_LOGS_PATH,
+    PASSWORD_CHANGE_LOGS_PATH,
+    USER_SESSIONS_PATH,
+    TERMINAL_SESSIONS_PATH,
+    TERMINAL_COMMANDS_PATH,
+}
 CANONICAL_DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 DATE_INPUT_FORMATS = (
     "%Y-%m-%d",
@@ -47,6 +98,73 @@ DATETIME_INPUT_FORMATS = (
     "%Y/%m/%d %H:%M:%S %z",
 )
 BASIC_NAIVE_DATETIME_RE = re.compile(r"^\d{4}[-/]\d{2}[-/]\d{2}\s+\d{2}:\d{2}:\d{2}$")
+DISPLAY_STYLE_USER_RE = re.compile(r"^(?P<name>.*)\((?P<username>[^()]+)\)$")
+OPERATE_ACTION_ALIASES = {
+    "create": "create",
+    "创建": "create",
+    "view": "view",
+    "查看": "view",
+    "update": "update",
+    "更新": "update",
+    "delete": "delete",
+    "删除": "delete",
+    "export": "export",
+    "导出": "export",
+    "download": "download",
+    "下载": "download",
+    "connect": "connect",
+    "连接": "connect",
+    "login": "login",
+    "登录": "login",
+    "change_password": "change_password",
+    "改密": "change_password",
+    "accept": "accept",
+    "接受": "accept",
+    "review": "review",
+    "审批": "review",
+    "notice": "notice",
+    "通知": "notice",
+    "reject": "reject",
+    "拒绝": "reject",
+    "approve": "approve",
+    "同意": "approve",
+    "close": "close",
+    "关闭": "close",
+    "finished": "finished",
+    "完成": "finished",
+}
+OPERATE_ACTION_CANONICAL_VALUES = (
+    "create",
+    "view",
+    "update",
+    "delete",
+    "export",
+    "download",
+    "connect",
+    "login",
+    "change_password",
+    "accept",
+    "review",
+    "notice",
+    "reject",
+    "approve",
+    "close",
+    "finished",
+)
+LOGIN_TYPE_VALUES = ("W", "T", "U")
+LOGIN_MFA_VALUES = ("0", "1", "2")
+LOGIN_STATUS_VALUES = ("0", "1")
+SESSION_LOGIN_FROM_VALUES = ("WT", "ST", "RT", "DT", "VT")
+TICKET_STATE_VALUES = ("closed", "pending", "approved", "rejected", "all")
+TICKET_TYPE_VALUES = ("apply_asset", "login_confirm", "command_confirm", "login_asset_confirm")
+
+
+def _runtime_local_timezone() -> tzinfo:
+    return datetime.now().astimezone().tzinfo or timezone.utc
+
+
+def _local_now() -> datetime:
+    return datetime.now(_runtime_local_timezone())
 
 
 def _lower(value: Any) -> str:
@@ -91,6 +209,12 @@ def parse_datetime_value(value: Any, *, naive_tz: tzinfo | None = timezone.utc) 
     text = str(value).strip()
     if not text:
         return None
+
+    if text.endswith("Z"):
+        try:
+            return datetime.fromisoformat(text[:-1] + "+00:00")
+        except ValueError:
+            pass
 
     for fmt in DATETIME_INPUT_FORMATS:
         try:
@@ -186,6 +310,10 @@ def _extract_user(item: dict[str, Any]) -> str:
         "username",
         "created_by",
     )
+
+
+def _extract_user_id(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "user_id", "user.id")
 
 
 def _extract_asset(item: dict[str, Any]) -> str:
@@ -314,6 +442,18 @@ def _extract_protocol(item: dict[str, Any]) -> str:
     )
 
 
+def _extract_login_type(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "type", "type_display", "login_type")
+
+
+def _extract_login_city(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "city", "city_display", "login_city")
+
+
+def _extract_login_mfa(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "mfa", "mfa_display", "mfa_status")
+
+
 def _extract_source_ip(item: dict[str, Any]) -> str:
     return _extract_identifier(
         item,
@@ -324,6 +464,10 @@ def _extract_source_ip(item: dict[str, Any]) -> str:
         "ip",
         "client_ip",
     )
+
+
+def _extract_login_from(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "login_from", "login_from_display", "from", "terminal_from")
 
 
 def _extract_status(item: dict[str, Any]) -> str:
@@ -339,6 +483,33 @@ def _extract_status(item: dict[str, Any]) -> str:
 
 def _extract_direction(item: dict[str, Any]) -> str:
     return _extract_identifier(item, "operate", "direction", "type", "action")
+
+
+def _extract_resource_type(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "resource_type", "resource.type", "resource_type_display")
+
+
+def _extract_change_by(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "change_by", "change_by_display", "operator", "operator_display")
+
+
+def _extract_creator_name(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "creator__name", "creator.name", "creator", "created_by", "user.name")
+
+
+def _extract_material(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "material", "command", "input", "cmd")
+
+
+def _extract_ticket_applicant(item: dict[str, Any]) -> str:
+    return _extract_identifier(
+        item,
+        "applicant_username_name",
+        "applicant.name",
+        "applicant.username",
+        "applicant",
+        "applicant_display",
+    )
 
 
 def _extract_datetime(item: dict[str, Any]) -> datetime | None:
@@ -360,6 +531,29 @@ def _extract_datetime(item: dict[str, Any]) -> datetime | None:
 
 def _parse_datetime_value(value: Any) -> datetime | None:
     return parse_datetime_value(value, naive_tz=timezone.utc)
+
+
+def _parse_filter_datetime_value(
+    value: Any,
+    *,
+    end_of_day: bool = False,
+    naive_tz: tzinfo | None = None,
+) -> datetime | None:
+    active_tz = naive_tz or _runtime_local_timezone()
+    parsed = parse_datetime_value(value, naive_tz=active_tz)
+    if parsed is not None:
+        return parsed
+    parsed_date = parse_date_value(value)
+    if parsed_date is None:
+        return None
+    hour, minute, second = (23, 59, 59) if end_of_day else (0, 0, 0)
+    return datetime(parsed_date.year, parsed_date.month, parsed_date.day, hour, minute, second, tzinfo=active_tz)
+
+
+def _format_local_filter_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(_runtime_local_timezone()).strftime(CANONICAL_DATETIME_FORMAT)
 
 
 def _extract_duration(item: dict[str, Any]) -> float | None:
@@ -390,7 +584,21 @@ def _extract_duration(item: dict[str, Any]) -> float | None:
 
 def _match_text(value: str, expected: Any) -> bool:
     expected_text = _lower(expected)
-    return not expected_text or expected_text in _lower(value)
+    if not expected_text:
+        return True
+    value_text = _lower(value)
+    if expected_text in value_text:
+        return True
+    parsed_display = _parse_display_style_value(expected)
+    if parsed_display is None:
+        return False
+    display_name = _lower(parsed_display.get("name"))
+    display_identifier = _lower(parsed_display.get("identifier"))
+    return value_text in {display_name, display_identifier} or (
+        bool(display_name) and display_name in value_text
+    ) or (
+        bool(display_identifier) and display_identifier in value_text
+    )
 
 
 def _match_time(record_time: datetime | None, filters: dict[str, Any]) -> bool:
@@ -403,24 +611,589 @@ def _match_time(record_time: datetime | None, filters: dict[str, Any]) -> bool:
     return True
 
 
-def _normalize_time_filters(filters: dict[str, Any], *, default_days: int = 7) -> dict[str, Any]:
+def _normalize_user_filter_payload(filters: dict[str, Any]) -> dict[str, Any]:
     payload = dict(filters)
-    now = datetime.now(timezone.utc)
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    if isinstance(diagnostics.get("user_filter_normalization"), dict):
+        return payload
+
+    requested_user = str(payload.get("user") or "").strip()
+    requested_user_id = str(payload.get("user_id") or "").strip()
+    if not requested_user and not requested_user_id:
+        return payload
+
+    normalization = {
+        "applied": False,
+        "strategy": None,
+        "requested_user": requested_user or None,
+        "requested_user_id": requested_user_id or None,
+        "effective_user_id": requested_user_id or None,
+    }
+    if requested_user and is_uuid_like(requested_user) and not requested_user_id:
+        payload["user_id"] = requested_user
+        normalization["applied"] = True
+        normalization["strategy"] = "user_uuid_promoted_to_user_id"
+        normalization["effective_user_id"] = requested_user
+
+    diagnostics["user_filter_normalization"] = normalization
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _compact_user_summary(user: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(user, dict):
+        return None
+    return {
+        "id": str(user.get("id") or "").strip() or None,
+        "name": str(user.get("name") or "").strip() or None,
+        "username": str(user.get("username") or "").strip() or None,
+    }
+
+
+def _compact_asset_summary(asset: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(asset, dict):
+        return None
+    return {
+        "id": str(asset.get("id") or "").strip() or None,
+        "name": str(asset.get("name") or "").strip() or None,
+        "address": str(asset.get("address") or "").strip() or None,
+    }
+
+
+def _compact_account_summary(account: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(account, dict):
+        return None
+    return {
+        "id": str(account.get("id") or "").strip() or None,
+        "name": str(account.get("name") or "").strip() or None,
+        "username": str(account.get("username") or "").strip() or None,
+    }
+
+
+def _format_user_display_value(user: dict[str, Any] | None) -> str:
+    if not isinstance(user, dict):
+        return ""
+    name = str(user.get("name") or "").strip()
+    username = str(user.get("username") or "").strip()
+    if name and username and _lower(name) != _lower(username):
+        return f"{name}({username})"
+    return name or username
+
+
+def _format_asset_display_value(asset: dict[str, Any] | None) -> str:
+    if not isinstance(asset, dict):
+        return ""
+    name = str(asset.get("name") or "").strip()
+    address = str(asset.get("address") or "").strip()
+    if name and address:
+        return f"{name}({address})"
+    return name or address
+
+
+def _format_account_display_value(account: dict[str, Any] | None) -> str:
+    if not isinstance(account, dict):
+        return ""
+    name = str(account.get("name") or "").strip()
+    username = str(account.get("username") or "").strip()
+    if name and username:
+        return f"{name}({username})"
+    return name or username
+
+
+def _parse_display_style_value(value: Any) -> dict[str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = DISPLAY_STYLE_USER_RE.fullmatch(text)
+    if not match:
+        return None
+    name = match.group("name").strip()
+    identifier = match.group("username").strip()
+    if not identifier:
+        return None
+    return {"name": name, "identifier": identifier}
+
+
+def _parse_display_style_user(value: Any) -> dict[str, str] | None:
+    parsed = _parse_display_style_value(value)
+    if parsed is None:
+        return None
+    return {"name": parsed["name"], "username": parsed["identifier"]}
+
+
+def _parse_display_style_asset(value: Any) -> dict[str, str] | None:
+    parsed = _parse_display_style_value(value)
+    if parsed is None:
+        return None
+    return {"name": parsed["name"], "address": parsed["identifier"]}
+
+
+def _parse_display_style_account(value: Any) -> dict[str, str] | None:
+    parsed = _parse_display_style_value(value)
+    if parsed is None:
+        return None
+    return {"name": parsed["name"], "username": parsed["identifier"]}
+
+
+def _normalize_operate_action_filter(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_action = str(payload.get("action") or "").strip()
+    if not requested_action:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    canonical_action = OPERATE_ACTION_ALIASES.get(_lower(requested_action))
+    if canonical_action is None:
+        raise CLIError(
+            "无法解析操作日志动作过滤条件。",
+            payload=build_cli_guidance_payload(
+                "invalid_operate_action",
+                user_message="`operate` 审计的 `--action` 只支持页面动作枚举，请改用英文值或中文别名。",
+                action_hint="例如 `--action create`、`--action 创建` 或 `--filter action=create`。",
+                action=requested_action,
+                allowed_actions=list(OPERATE_ACTION_CANONICAL_VALUES),
+            ),
+        )
+    diagnostics["operate_action_normalization"] = {
+        "requested_action": requested_action,
+        "effective_action": canonical_action,
+        "applied": canonical_action != requested_action,
+    }
+    payload["action"] = canonical_action
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_operate_user_filter(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_user = str(payload.get("user") or "").strip()
+    if not requested_user:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    user_diagnostics = {
+        "requested_user": requested_user,
+        "effective_user": requested_user,
+        "applied": False,
+        "strategy": None,
+        "fallback_raw": False,
+        "resolved_user": None,
+    }
+    active_discovery = discovery or create_discovery()
+    parsed_display_user = _parse_display_style_user(requested_user)
+    if parsed_display_user is not None:
+        try:
+            target = parsed_display_user.get("username") or parsed_display_user.get("name")
+            resolved_user = _resolve_user(target, discovery=active_discovery)
+        except CLIError as exc:
+            if exc.payload.get("reason_code") == "ambiguous_user":
+                raise
+            user_diagnostics["strategy"] = "display_value_passthrough"
+            user_diagnostics["fallback_raw"] = True
+            user_diagnostics["fallback_reason"] = exc.payload.get("reason_code") or "user_not_resolved"
+            diagnostics["operate_user_filter_normalization"] = user_diagnostics
+            payload["_filter_diagnostics"] = diagnostics
+            return payload
+        effective_user = _format_user_display_value(resolved_user) or requested_user
+        payload["user"] = effective_user
+        user_diagnostics["effective_user"] = effective_user
+        user_diagnostics["applied"] = effective_user != requested_user
+        user_diagnostics["strategy"] = "display_value_resolved"
+        user_diagnostics["resolved_user"] = _compact_user_summary(resolved_user)
+    else:
+        resolved_user = _resolve_user(requested_user, discovery=active_discovery)
+        effective_user = _format_user_display_value(resolved_user) or requested_user
+        payload["user"] = effective_user
+        user_diagnostics["effective_user"] = effective_user
+        user_diagnostics["applied"] = effective_user != requested_user
+        user_diagnostics["strategy"] = "user_resolved_to_display"
+        user_diagnostics["resolved_user"] = _compact_user_summary(resolved_user)
+        if is_uuid_like(requested_user) and payload.get("user_id") == requested_user:
+            payload.pop("user_id", None)
+            user_diagnostics["dropped_promoted_user_id"] = True
+    diagnostics["operate_user_filter_normalization"] = user_diagnostics
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_operate_audit_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_operate_user_filter(filters, discovery=discovery)
+    payload = _normalize_operate_action_filter(payload)
+    return payload
+
+
+def _normalize_filter_alias(
+    filters: dict[str, Any],
+    *,
+    source_key: str,
+    target_key: str,
+    diagnostics_key: str,
+) -> dict[str, Any]:
+    payload = dict(filters)
+    source_value = str(payload.get(source_key) or "").strip()
+    if not source_value or payload.get(target_key) not in {None, ""}:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    payload[target_key] = source_value
+    payload.pop(source_key, None)
+    diagnostics[diagnostics_key] = {
+        "requested_key": source_key,
+        "requested_value": source_value,
+        "effective_key": target_key,
+        "effective_value": source_value,
+        "applied": True,
+    }
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_allowed_values_filter(
+    filters: dict[str, Any],
+    *,
+    key: str,
+    allowed_values: tuple[str, ...],
+    reason_code: str,
+    user_message: str,
+    action_hint: str,
+) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_value = str(payload.get(key) or "").strip()
+    if not requested_value:
+        return payload
+    if requested_value in allowed_values:
+        return payload
+    raise CLIError(
+        "无法解析页面枚举过滤条件。",
+        payload=build_cli_guidance_payload(
+            reason_code,
+            user_message=user_message,
+            action_hint=action_hint,
+            field=key,
+            value=requested_value,
+            allowed_values=list(allowed_values),
+        ),
+    )
+
+
+def _normalize_user_display_filter(
+    filters: dict[str, Any],
+    *,
+    key: str,
+    diagnostics_key: str,
+    output_mode: str,
+    discovery=None,
+) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_value = str(payload.get(key) or "").strip()
+    if not requested_value:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    field_diagnostics = {
+        "requested_value": requested_value,
+        "effective_value": requested_value,
+        "applied": False,
+        "strategy": None,
+        "fallback_raw": False,
+        "resolved_user": None,
+    }
+    active_discovery = discovery or create_discovery()
+    parsed_display = _parse_display_style_user(requested_value)
+    try:
+        resolve_target = requested_value
+        if parsed_display is not None:
+            resolve_target = parsed_display.get("username") or parsed_display.get("name") or requested_value
+        resolved_user = _resolve_user(resolve_target, discovery=active_discovery)
+    except CLIError as exc:
+        payload_detail = exc.payload if isinstance(exc.payload, dict) else {}
+        if parsed_display is not None and payload_detail.get("reason_code") != "ambiguous_user":
+            field_diagnostics["strategy"] = "display_value_passthrough"
+            field_diagnostics["fallback_raw"] = True
+            field_diagnostics["fallback_reason"] = payload_detail.get("reason_code") or "user_not_resolved"
+            diagnostics[diagnostics_key] = field_diagnostics
+            payload["_filter_diagnostics"] = diagnostics
+            return payload
+        raise
+    if output_mode == "name":
+        effective_value = str(resolved_user.get("name") or resolved_user.get("username") or "").strip() or requested_value
+        field_diagnostics["strategy"] = "user_resolved_to_name"
+    else:
+        effective_value = _format_user_display_value(resolved_user) or requested_value
+        field_diagnostics["strategy"] = "display_value_resolved" if parsed_display is not None else "user_resolved_to_display"
+    payload[key] = effective_value
+    field_diagnostics["effective_value"] = effective_value
+    field_diagnostics["applied"] = effective_value != requested_value
+    field_diagnostics["resolved_user"] = _compact_user_summary(resolved_user)
+    diagnostics[diagnostics_key] = field_diagnostics
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_asset_display_filter(
+    filters: dict[str, Any],
+    *,
+    key: str,
+    diagnostics_key: str,
+    discovery=None,
+) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_value = str(payload.get(key) or "").strip()
+    if not requested_value:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    field_diagnostics = {
+        "requested_value": requested_value,
+        "effective_value": requested_value,
+        "applied": False,
+        "strategy": None,
+        "fallback_raw": False,
+        "resolved_asset": None,
+    }
+    active_discovery = discovery or create_discovery()
+    parsed_display = _parse_display_style_asset(requested_value)
+    try:
+        resolve_target = requested_value
+        if parsed_display is not None:
+            resolve_target = parsed_display.get("address") or parsed_display.get("name") or requested_value
+        resolved_asset = _resolve_asset(resolve_target, discovery=active_discovery)
+    except CLIError as exc:
+        payload_detail = exc.payload if isinstance(exc.payload, dict) else {}
+        if parsed_display is not None and payload_detail.get("reason_code") != "ambiguous_asset":
+            field_diagnostics["strategy"] = "display_value_passthrough"
+            field_diagnostics["fallback_raw"] = True
+            field_diagnostics["fallback_reason"] = payload_detail.get("reason_code") or "asset_not_resolved"
+            diagnostics[diagnostics_key] = field_diagnostics
+            payload["_filter_diagnostics"] = diagnostics
+            return payload
+        raise
+    effective_value = _format_asset_display_value(resolved_asset) or requested_value
+    payload[key] = effective_value
+    field_diagnostics["effective_value"] = effective_value
+    field_diagnostics["applied"] = effective_value != requested_value
+    field_diagnostics["strategy"] = "display_value_resolved" if parsed_display is not None else "asset_resolved_to_display"
+    field_diagnostics["resolved_asset"] = _compact_asset_summary(resolved_asset)
+    diagnostics[diagnostics_key] = field_diagnostics
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_account_display_filter(
+    filters: dict[str, Any],
+    *,
+    key: str,
+    diagnostics_key: str,
+    discovery=None,
+) -> dict[str, Any]:
+    payload = dict(filters)
+    requested_value = str(payload.get(key) or "").strip()
+    if not requested_value:
+        return payload
+    diagnostics = dict(payload.get("_filter_diagnostics") or {})
+    field_diagnostics = {
+        "requested_value": requested_value,
+        "effective_value": requested_value,
+        "applied": False,
+        "strategy": None,
+        "fallback_raw": False,
+        "resolved_account": None,
+    }
+    active_discovery = discovery or create_discovery()
+    parsed_display = _parse_display_style_account(requested_value)
+    try:
+        resolve_target = requested_value
+        if parsed_display is not None:
+            resolve_target = parsed_display.get("username") or parsed_display.get("name") or requested_value
+        resolved_account = _resolve_account(resolve_target, discovery=active_discovery)
+    except CLIError as exc:
+        payload_detail = exc.payload if isinstance(exc.payload, dict) else {}
+        if parsed_display is not None and payload_detail.get("reason_code") != "ambiguous_account":
+            field_diagnostics["strategy"] = "display_value_passthrough"
+            field_diagnostics["fallback_raw"] = True
+            field_diagnostics["fallback_reason"] = payload_detail.get("reason_code") or "account_not_resolved"
+            diagnostics[diagnostics_key] = field_diagnostics
+            payload["_filter_diagnostics"] = diagnostics
+            return payload
+        raise
+    effective_value = _format_account_display_value(resolved_account) or requested_value
+    payload[key] = effective_value
+    field_diagnostics["effective_value"] = effective_value
+    field_diagnostics["applied"] = effective_value != requested_value
+    field_diagnostics["strategy"] = "display_value_resolved" if parsed_display is not None else "account_resolved_to_display"
+    field_diagnostics["resolved_account"] = _compact_account_summary(resolved_account)
+    diagnostics[diagnostics_key] = field_diagnostics
+    payload["_filter_diagnostics"] = diagnostics
+    return payload
+
+
+def _normalize_login_audit_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_filter_alias(
+        filters,
+        source_key="source_ip",
+        target_key="ip",
+        diagnostics_key="login_ip_filter_normalization",
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="username",
+        diagnostics_key="login_username_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="type",
+        allowed_values=LOGIN_TYPE_VALUES,
+        reason_code="invalid_login_type",
+        user_message="`login` 审计的 `--type` 只支持页面设备类型枚举。",
+        action_hint="请改用 `W`、`T` 或 `U`。",
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="mfa",
+        allowed_values=LOGIN_MFA_VALUES,
+        reason_code="invalid_login_mfa",
+        user_message="`login` 审计的 `--mfa` 只支持页面枚举值。",
+        action_hint="请改用 `0`、`1` 或 `2`。",
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="status",
+        allowed_values=LOGIN_STATUS_VALUES,
+        reason_code="invalid_login_status",
+        user_message="`login` 审计的 `--status` 只支持页面状态枚举。",
+        action_hint="请改用 `0` 或 `1`。",
+    )
+    return payload
+
+
+def _normalize_password_change_audit_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_filter_alias(
+        filters,
+        source_key="source_ip",
+        target_key="remote_addr",
+        diagnostics_key="password_change_remote_addr_filter_normalization",
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="user",
+        diagnostics_key="password_change_user_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="change_by",
+        diagnostics_key="password_change_change_by_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    return payload
+
+
+def _normalize_job_audit_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    return _normalize_user_display_filter(
+        filters,
+        key="creator__name",
+        diagnostics_key="job_creator_filter_normalization",
+        output_mode="name",
+        discovery=discovery,
+    )
+
+
+def _normalize_terminal_session_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_filter_alias(
+        filters,
+        source_key="source_ip",
+        target_key="remote_addr",
+        diagnostics_key="terminal_session_remote_addr_filter_normalization",
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="user",
+        diagnostics_key="terminal_session_user_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    payload = _normalize_account_display_filter(
+        payload,
+        key="account",
+        diagnostics_key="terminal_session_account_filter_normalization",
+        discovery=discovery,
+    )
+    payload = _normalize_asset_display_filter(
+        payload,
+        key="asset",
+        diagnostics_key="terminal_session_asset_filter_normalization",
+        discovery=discovery,
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="login_from",
+        allowed_values=SESSION_LOGIN_FROM_VALUES,
+        reason_code="invalid_terminal_session_login_from",
+        user_message="`terminal-session` 的 `--login-from` 只支持页面来源类型枚举。",
+        action_hint="请改用 `WT`、`ST`、`RT`、`DT` 或 `VT`。",
+    )
+    return payload
+
+
+def _normalize_ticket_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_user_display_filter(
+        filters,
+        key="applicant_username_name",
+        diagnostics_key="ticket_applicant_filter_normalization",
+        output_mode="name",
+        discovery=discovery,
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="state",
+        allowed_values=TICKET_STATE_VALUES,
+        reason_code="invalid_ticket_state",
+        user_message="`tickets` 的 `--state` 只支持页面审批状态枚举。",
+        action_hint="请改用 `closed`、`pending`、`approved`、`rejected` 或 `all`。",
+    )
+    payload = _normalize_allowed_values_filter(
+        payload,
+        key="type",
+        allowed_values=TICKET_TYPE_VALUES,
+        reason_code="invalid_ticket_type",
+        user_message="`tickets` 的 `--type` 只支持页面工单类型枚举。",
+        action_hint="请改用 `apply_asset`、`login_confirm`、`command_confirm` 或 `login_asset_confirm`。",
+    )
+    return payload
+
+
+def _extract_filter_diagnostics(filters: dict[str, Any] | None) -> dict[str, Any] | None:
+    diagnostics = (filters or {}).get("_filter_diagnostics")
+    return dict(diagnostics) if isinstance(diagnostics, dict) and diagnostics else None
+
+
+def _normalize_time_filters(filters: dict[str, Any], *, default_days: int = 7) -> dict[str, Any]:
+    payload = _normalize_user_filter_payload(filters)
+    now = _local_now()
     date_from = payload.get("date_from")
     date_to = payload.get("date_to")
     days = payload.get("days")
+    date_from_dt = None
+    date_to_dt = None
     if days not in {None, ""} and not date_from and not date_to:
-        date_from = (now - timedelta(days=int(days))).strftime("%Y-%m-%d %H:%M:%S")
-        date_to = now.strftime("%Y-%m-%d %H:%M:%S")
+        date_from_dt = now - timedelta(days=int(days))
+        date_to_dt = now
     if not date_from and not date_to:
-        date_from = (now - timedelta(days=default_days)).strftime("%Y-%m-%d %H:%M:%S")
-        date_to = now.strftime("%Y-%m-%d %H:%M:%S")
-    if date_from not in {None, ""}:
-        payload["date_from"] = normalize_basic_datetime_text(date_from, naive_tz=timezone.utc) or date_from
-    if date_to not in {None, ""}:
-        payload["date_to"] = normalize_basic_datetime_text(date_to, naive_tz=timezone.utc) or date_to
-    payload["_date_from"] = _parse_datetime_value(payload.get("date_from"))
-    payload["_date_to"] = _parse_datetime_value(payload.get("date_to")) or now
+        date_from_dt = now - timedelta(days=default_days)
+        date_to_dt = now
+    if date_from_dt is None and date_from not in {None, ""}:
+        date_from_dt = _parse_filter_datetime_value(date_from, end_of_day=False)
+    if date_to_dt is None and date_to not in {None, ""}:
+        date_to_dt = _parse_filter_datetime_value(date_to, end_of_day=True)
+    if date_from_dt is not None:
+        payload["date_from"] = _format_local_filter_datetime(date_from_dt) or payload.get("date_from")
+    elif date_from not in {None, ""}:
+        payload["date_from"] = normalize_basic_datetime_text(date_from, naive_tz=_runtime_local_timezone()) or date_from
+    if date_to_dt is not None:
+        payload["date_to"] = _format_local_filter_datetime(date_to_dt) or payload.get("date_to")
+    elif date_to not in {None, ""}:
+        payload["date_to"] = normalize_basic_datetime_text(date_to, naive_tz=_runtime_local_timezone()) or date_to
+    payload["_date_from"] = date_from_dt
+    payload["_date_to"] = date_to_dt or now
     return payload
 
 
@@ -431,16 +1204,33 @@ def _server_filters(filters: dict[str, Any]) -> dict[str, Any]:
         "date_to",
         "limit",
         "offset",
+        "name",
         "search",
+        "user",
+        "username",
+        "change_by",
+        "creator__name",
+        "applicant_username_name",
         "keyword",
+        "material",
         "status",
+        "state",
         "type",
+        "ip",
+        "city",
+        "mfa",
         "user_id",
         "asset_id",
+        "account",
+        "protocol",
+        "remote_addr",
+        "source_ip",
+        "login_from",
         "command_storage_id",
         "order",
         "is_finished",
         "users",
+        "action",
         "resource_type",
         "category",
         "days",
@@ -455,6 +1245,55 @@ def _server_filters(filters: dict[str, Any]) -> dict[str, Any]:
         if filters.get(key) not in {None, ""}:
             payload[key] = filters[key]
     return payload
+
+
+def _format_jumpserver_api_datetime(value: Any) -> str | None:
+    parsed = parse_datetime_value(value, naive_tz=_runtime_local_timezone())
+    if parsed is None:
+        return None
+    return parsed.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def _query_time_window_server_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _server_filters(filters)
+    payload.pop("days", None)
+    date_from = filters.get("_date_from") or _parse_filter_datetime_value(payload.get("date_from"), end_of_day=False)
+    date_to = filters.get("_date_to") or _parse_filter_datetime_value(payload.get("date_to"), end_of_day=True)
+    if date_from is not None:
+        payload["date_from"] = _format_jumpserver_api_datetime(date_from) or payload.get("date_from")
+    elif payload.get("date_from") in {None, ""}:
+        payload.pop("date_from", None)
+    if date_to is not None:
+        payload["date_to"] = _format_jumpserver_api_datetime(date_to) or payload.get("date_to")
+    elif payload.get("date_to") in {None, ""}:
+        payload.pop("date_to", None)
+    return payload
+
+
+def _operate_audit_server_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _query_time_window_server_filters(filters)
+    for key in ("user", "action"):
+        if filters.get(key) not in {None, ""}:
+            payload[key] = filters[key]
+    return payload
+
+
+def _command_audit_server_filters(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _query_time_window_server_filters(filters)
+    payload.setdefault("order", "-timestamp")
+    payload.setdefault("display", 1)
+    payload.setdefault("draw", 1)
+    return payload
+
+
+def _list_request_filters(path: str, filters: dict[str, Any]) -> dict[str, Any]:
+    if path == TERMINAL_COMMANDS_PATH:
+        return _command_audit_server_filters(filters)
+    if path == OPERATE_LOGS_PATH:
+        return _operate_audit_server_filters(filters)
+    if path in QUERY_TIME_WINDOW_PATHS:
+        return _query_time_window_server_filters(filters)
+    return _server_filters(filters)
 
 
 def _top(counter: Counter, *, limit: int = 10) -> list[dict[str, Any]]:
@@ -487,7 +1326,41 @@ def _apply_common_filters(items: list[dict[str, Any]], filters: dict[str, Any]) 
         timestamp = _extract_datetime(item)
         if not _match_time(timestamp, filters):
             continue
-        if filters.get("user") and not _match_text(_extract_user(item), filters["user"]):
+        requested_username = str(filters.get("username") or "").strip()
+        if requested_username and not _match_text(_extract_user(item), requested_username):
+            continue
+        requested_user_id = str(filters.get("user_id") or "").strip()
+        if requested_user_id and _extract_user_id(item) != requested_user_id:
+            continue
+        requested_user = str(filters.get("user") or "").strip()
+        if requested_user and not is_uuid_like(requested_user) and not _match_text(_extract_user(item), requested_user):
+            continue
+        requested_change_by = str(filters.get("change_by") or "").strip()
+        if requested_change_by and not _match_text(_extract_change_by(item), requested_change_by):
+            continue
+        requested_creator_name = str(filters.get("creator__name") or "").strip()
+        if requested_creator_name and not _match_text(_extract_creator_name(item), requested_creator_name):
+            continue
+        requested_applicant = str(filters.get("applicant_username_name") or "").strip()
+        if requested_applicant and not _match_text(_extract_ticket_applicant(item), requested_applicant):
+            continue
+        requested_action = str(filters.get("action") or "").strip()
+        if requested_action and not _match_text(_extract_direction(item), requested_action):
+            continue
+        requested_resource_type = str(filters.get("resource_type") or "").strip()
+        if requested_resource_type and not _match_text(_extract_resource_type(item), requested_resource_type):
+            continue
+        requested_type = str(filters.get("type") or "").strip()
+        if requested_type and not _match_text(_extract_login_type(item), requested_type):
+            continue
+        requested_city = str(filters.get("city") or "").strip()
+        if requested_city and not _match_text(_extract_login_city(item), requested_city):
+            continue
+        requested_mfa = str(filters.get("mfa") or "").strip()
+        if requested_mfa and not _match_text(_extract_login_mfa(item), requested_mfa):
+            continue
+        requested_state = str(filters.get("state") or "").strip()
+        if requested_state and not _match_text(_extract_status(item), requested_state):
             continue
         if filters.get("asset") and not _match_asset_filter(item, filters["asset"]):
             continue
@@ -495,7 +1368,15 @@ def _apply_common_filters(items: list[dict[str, Any]], filters: dict[str, Any]) 
             continue
         if filters.get("protocol") and not _match_text(_extract_protocol(item), filters["protocol"]):
             continue
+        if filters.get("ip") and not _match_text(_extract_source_ip(item), filters["ip"]):
+            continue
+        if filters.get("remote_addr") and not _match_text(_extract_source_ip(item), filters["remote_addr"]):
+            continue
         if filters.get("source_ip") and not _match_text(_extract_source_ip(item), filters["source_ip"]):
+            continue
+        if filters.get("login_from") and not _match_text(_extract_login_from(item), filters["login_from"]):
+            continue
+        if filters.get("material") and not _match_text(_extract_material(item), filters["material"]):
             continue
         keyword = filters.get("keyword")
         if keyword:
@@ -534,7 +1415,7 @@ def _with_org_context(result: dict[str, Any]) -> dict[str, Any]:
 
 def _fetch_list(path: str, filters: dict[str, Any]) -> list[dict[str, Any]]:
     client = create_client()
-    result = client.list_paginated(path, params=_server_filters(filters))
+    result = client.list_paginated(path, params=_list_request_filters(path, filters))
     if isinstance(result, list):
         return [item for item in result if isinstance(item, dict)]
     return []
@@ -654,27 +1535,264 @@ def _with_command_storage_context(result: dict[str, Any], filters: dict[str, Any
     return payload
 
 
+def _command_record_storage_id(item: dict[str, Any], *, fallback: Any = None) -> str:
+    for candidate in (fallback, item.get("command_storage_id"), item.get("_command_storage_id")):
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _command_record_session_id(item: dict[str, Any]) -> str:
+    return str(_first_field(item, "session", "session_id") or "").strip()
+
+
+def _command_record_timestamp(item: dict[str, Any]) -> int:
+    raw = item.get("timestamp")
+    if raw not in {None, ""}:
+        try:
+            return int(float(raw))
+        except (TypeError, ValueError):
+            pass
+    parsed = _extract_datetime(item)
+    if parsed is not None:
+        return int(parsed.timestamp())
+    return 0
+
+
+def _command_record_risk_level_value(item: dict[str, Any]) -> int:
+    raw = _first_field(item, "risk_level.value", "risk_level")
+    if isinstance(raw, dict):
+        raw = raw.get("value")
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _command_record_stable_payload(item: dict[str, Any], *, command_storage_id: str | None = None, include_storage: bool = True) -> dict[str, Any]:
+    payload = {
+        "org_id": str(item.get("org_id") or "").strip(),
+        "user": str(item.get("user") or "").strip(),
+        "asset": str(item.get("asset") or "").strip(),
+        "account": str(item.get("account") or "").strip(),
+        "session": _command_record_session_id(item),
+        "timestamp": _command_record_timestamp(item),
+        "input": str(item.get("input") or "").strip(),
+        "remote_addr": str(_first_field(item, "remote_addr", "remote_address", "src_ip", "source_ip") or "").strip(),
+        "risk_level": _command_record_risk_level_value(item),
+    }
+    if include_storage:
+        payload["command_storage_id"] = _command_record_storage_id(item, fallback=command_storage_id)
+    return payload
+
+
+def _command_record_sha1(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+    return hashlib.sha1(encoded).hexdigest()
+
+
+def _build_command_record_stable_id(item: dict[str, Any], *, command_storage_id: str | None = None) -> str:
+    payload = _command_record_stable_payload(item, command_storage_id=command_storage_id, include_storage=True)
+    storage_id = str(payload.get("command_storage_id") or "").strip() or "-"
+    session_id = str(payload.get("session") or "").strip() or "-"
+    timestamp = int(payload.get("timestamp") or 0)
+    return "cmdrec:v1:%s:%s:%s:%s" % (storage_id, session_id, timestamp, _command_record_sha1(payload))
+
+
+def _parse_command_record_stable_id(value: Any) -> dict[str, Any] | None:
+    text = str(value or "").strip()
+    parts = text.split(":")
+    if len(parts) != 6 or parts[0] != "cmdrec" or parts[1] != "v1":
+        return None
+    try:
+        timestamp = int(parts[4])
+    except (TypeError, ValueError):
+        return None
+    digest = str(parts[5] or "").strip().lower()
+    if len(digest) != 40 or any(ch not in "0123456789abcdef" for ch in digest):
+        return None
+    storage_id = str(parts[2] or "").strip()
+    session_id = str(parts[3] or "").strip()
+    return {
+        "storage_id": None if storage_id in {"", "-"} else storage_id,
+        "session_id": None if session_id in {"", "-"} else session_id,
+        "timestamp": timestamp,
+        "sha1": digest,
+        "stable_id": text,
+    }
+
+
+def _normalize_command_record(item: dict[str, Any], *, command_storage_id: str | None = None) -> dict[str, Any]:
+    cloned = dict(item)
+    storage_id = _command_record_storage_id(cloned, fallback=command_storage_id)
+    existing_source_row_id = str(cloned.get("source_row_id") or "").strip()
+    current_id = str(cloned.get("id") or "").strip()
+    if existing_source_row_id:
+        cloned["source_row_id"] = existing_source_row_id
+    elif current_id and _parse_command_record_stable_id(current_id) is None:
+        cloned["source_row_id"] = current_id
+    if storage_id:
+        cloned["command_storage_id"] = storage_id
+        cloned.setdefault("_command_storage_id", storage_id)
+    cloned["id"] = _build_command_record_stable_id(cloned, command_storage_id=storage_id)
+    return cloned
+
+
+def _command_record_merge_identity(item: dict[str, Any]) -> str:
+    payload = _command_record_stable_payload(item, include_storage=False)
+    return "merge:%s" % _command_record_sha1(payload)
+
+
 def _command_record_identity(item: dict[str, Any]) -> str:
-    record_id = str(item.get("id") or "").strip()
-    if record_id:
-        return "id:%s" % record_id
-    stable_payload = {key: value for key, value in item.items() if key not in {"_command_storage_id"}}
-    return "json:%s" % json.dumps(stable_payload, sort_keys=True, ensure_ascii=False, default=str)
+    parsed = _parse_command_record_stable_id(item.get("id"))
+    if parsed is not None:
+        return "stable:%s" % parsed["stable_id"]
+    return "stable:%s" % _build_command_record_stable_id(item)
+
+
+def _command_query_records(client, query_payload: dict[str, Any], *, follow_all: bool) -> list[dict[str, Any]]:
+    page_limit = int(query_payload.get("limit") or 100)
+    offset = int(query_payload.get("offset") or 0)
+    max_pages = 200
+    records: list[dict[str, Any]] = []
+
+    for _ in range(max_pages):
+        page = client.get(TERMINAL_COMMANDS_PATH, params=query_payload)
+        if isinstance(page, dict) and isinstance(page.get("results"), list):
+            page_records = [item for item in page.get("results") or [] if isinstance(item, dict)]
+        elif isinstance(page, list):
+            page_records = [item for item in page if isinstance(item, dict)]
+        else:
+            page_records = []
+        records.extend(page_records)
+        if not follow_all or len(page_records) < page_limit:
+            break
+        offset += len(page_records)
+        query_payload = {**query_payload, "limit": page_limit, "offset": offset}
+    return records
+
+
+def _fetch_command_records_for_session(session_id: str, *, page_limit: int = 200) -> list[dict[str, Any]]:
+    session_value = str(session_id or "").strip()
+    if not session_value:
+        return []
+    client = create_client()
+    return _command_query_records(
+        client,
+        {
+            "session_id": session_value,
+            "limit": page_limit,
+            "offset": 0,
+            "display": 1,
+            "draw": 1,
+        },
+        follow_all=True,
+    )
+
+
+def _command_record_time_windows(timestamp: int) -> list[tuple[datetime, datetime]]:
+    record_time = datetime.fromtimestamp(int(timestamp or 0), tz=timezone.utc)
+    narrow_start = record_time - timedelta(minutes=5)
+    narrow_end = record_time + timedelta(minutes=5)
+    day_start = datetime.combine(record_time.date(), time.min, tzinfo=timezone.utc)
+    day_end = datetime.combine(record_time.date(), time.max, tzinfo=timezone.utc)
+    return [(narrow_start, narrow_end), (day_start, day_end)]
+
+
+def _fetch_command_records_for_storage_and_window(
+    command_storage_id: str,
+    *,
+    date_from: datetime,
+    date_to: datetime,
+    page_limit: int = 200,
+) -> list[dict[str, Any]]:
+    storage_id = str(command_storage_id or "").strip()
+    if not storage_id:
+        return []
+    client = create_client()
+    query_payload = _command_audit_server_filters(
+        {
+            "command_storage_id": storage_id,
+            "date_from": date_from,
+            "date_to": date_to,
+            "limit": page_limit,
+            "offset": 0,
+        }
+    )
+    return _command_query_records(client, query_payload, follow_all=True)
+
+
+def _legacy_fetch_command_record_by_raw_id(record_id: str, filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_time_filters(filters or {})
+    target_id = str(record_id or "").strip()
+    if not target_id:
+        raise CLIError("Command audit record id is required.")
+
+    storage_context = resolve_command_storage_context(payload)
+    storage_ids = []
+    selected_storage_id = str(storage_context.get("selected_command_storage_id") or "").strip()
+    if selected_storage_id:
+        storage_ids.append(selected_storage_id)
+    for item in storage_context.get("available_command_storages") or []:
+        candidate = str((item or {}).get("id") or "").strip()
+        if candidate and candidate not in storage_ids:
+            storage_ids.append(candidate)
+    if not storage_ids:
+        storage_ids.append("")
+
+    client = create_client()
+    page_limit = 200
+    max_pages = 100
+
+    for storage_id in storage_ids:
+        for page_index in range(max_pages):
+            query_payload = _command_audit_server_filters(
+                {
+                    "command_storage_id": storage_id,
+                    "limit": page_limit,
+                    "offset": page_index * page_limit,
+                }
+            )
+            page = client.get(TERMINAL_COMMANDS_PATH, params=query_payload)
+            if isinstance(page, dict) and isinstance(page.get("results"), list):
+                records = [item for item in page.get("results") or [] if isinstance(item, dict)]
+            elif isinstance(page, list):
+                records = [item for item in page if isinstance(item, dict)]
+            else:
+                records = []
+            for item in records:
+                if str(item.get("id") or "").strip() != target_id:
+                    continue
+                return _normalize_command_record(item, command_storage_id=storage_id)
+            if len(records) < page_limit:
+                break
+
+    raise CLIError(
+        "Command audit record not found.",
+        payload={
+            "record_id": target_id,
+            "queried_command_storage_ids": storage_ids,
+        },
+    )
 
 
 def _fetch_command_records_for_storage(payload: dict[str, Any], *, command_storage_id: str | None = None) -> list[dict[str, Any]]:
-    server_payload = _drop_local_time_only_filters(dict(payload))
+    server_payload = _command_audit_server_filters(_drop_local_time_only_filters(dict(payload)))
     if command_storage_id not in {None, ""}:
         server_payload["command_storage_id"] = command_storage_id
     elif server_payload.get("command_storage_id") in {None, ""}:
         server_payload.pop("command_storage_id", None)
-    records = _apply_common_filters(_fetch_list(TERMINAL_COMMANDS_PATH, server_payload), payload)
+    client = create_client()
+    records = _command_query_records(
+        client,
+        server_payload,
+        follow_all=payload.get("limit") in {None, ""} and payload.get("offset") in {None, ""},
+    )
+    records = _apply_common_filters(records, payload)
     final: list[dict[str, Any]] = []
     for item in records:
-        cloned = dict(item)
-        if command_storage_id not in {None, ""}:
-            cloned.setdefault("_command_storage_id", str(command_storage_id))
-        final.append(cloned)
+        final.append(_normalize_command_record(item, command_storage_id=str(command_storage_id or "").strip() or None))
     return final
 
 
@@ -689,7 +1807,7 @@ def _fetch_command_records(filters: dict[str, Any]) -> list[dict[str, Any]]:
             if not storage_id:
                 continue
             for record in _fetch_command_records_for_storage(payload, command_storage_id=storage_id):
-                record_identity = _command_record_identity(record)
+                record_identity = _command_record_merge_identity(record)
                 if record_identity in seen_record_ids:
                     continue
                 seen_record_ids.add(record_identity)
@@ -709,19 +1827,48 @@ def _fetch_command_records(filters: dict[str, Any]) -> list[dict[str, Any]]:
     return records
 
 
-def _fetch_terminal_session_records(filters: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    payload = _normalize_time_filters(filters)
-    query_payload = dict(payload)
-    resolved_asset = None
-    if query_payload.get("asset") and not query_payload.get("asset_id"):
-        try:
-            resolved_asset = _resolve_asset(name=str(query_payload.get("asset") or "").strip())
-        except CLIError:
-            resolved_asset = None
-        if resolved_asset and resolved_asset.get("id"):
-            query_payload["asset_id"] = resolved_asset.get("id")
+def _fetch_command_record_by_id(record_id: str, filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    target_id = str(record_id or "").strip()
+    if not target_id:
+        raise CLIError("Command audit record id is required.")
+    parsed = _parse_command_record_stable_id(target_id)
+    if parsed is None:
+        return _legacy_fetch_command_record_by_raw_id(target_id, filters or {})
 
-    server_payload = _drop_local_time_only_filters(query_payload)
+    session_id = parsed.get("session_id")
+    storage_id = str(parsed.get("storage_id") or "").strip()
+    if session_id:
+        for item in _fetch_command_records_for_session(session_id):
+            record = _normalize_command_record(item, command_storage_id=storage_id or None)
+            if record["id"] == target_id:
+                return record
+
+    if storage_id:
+        for date_from, date_to in _command_record_time_windows(int(parsed.get("timestamp") or 0)):
+            for item in _fetch_command_records_for_storage_and_window(
+                storage_id,
+                date_from=date_from,
+                date_to=date_to,
+            ):
+                record = _normalize_command_record(item, command_storage_id=storage_id)
+                if record["id"] == target_id:
+                    return record
+
+    raise CLIError(
+        "Command audit record not found.",
+        payload={
+            "record_id": target_id,
+            "lookup_strategy": "stable_id",
+            "session_id": session_id,
+            "command_storage_id": storage_id or None,
+        },
+    )
+
+
+def _fetch_terminal_session_records(filters: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    payload = _normalize_terminal_session_filters(_normalize_time_filters(filters))
+    server_payload = _drop_local_time_only_filters(dict(payload))
+    resolved_asset = ((_extract_filter_diagnostics(payload) or {}).get("terminal_session_asset_filter_normalization") or {}).get("resolved_asset")
     if server_payload.get("asset_id"):
         server_payload.pop("asset", None)
     records = _fetch_list(TERMINAL_SESSIONS_PATH, server_payload)
@@ -746,7 +1893,7 @@ def _fetch_terminal_session_records(filters: dict[str, Any]) -> tuple[list[dict[
 
 
 def _fetch_session_records(filters: dict[str, Any]) -> list[dict[str, Any]]:
-    payload = _normalize_time_filters(filters)
+    payload = _normalize_terminal_session_filters(_normalize_time_filters(filters))
     records, _ = _fetch_terminal_session_records(payload)
     if not records:
         audit_payload = _drop_local_time_only_filters(dict(payload))
@@ -785,8 +1932,10 @@ def _fetch_detail(path: str, item_id: str) -> dict[str, Any]:
     return {}
 
 
-def _list_permissions() -> list[dict[str, Any]]:
+def _list_permissions(*, client=None) -> list[dict[str, Any]]:
     try:
+        if client is not None:
+            return client.list_paginated(PERMISSION_PATH)
         return _fetch_list(PERMISSION_PATH, {})
     except Exception as exc:  # noqa: BLE001
         raise CLIError(
@@ -795,36 +1944,349 @@ def _list_permissions() -> list[dict[str, Any]]:
         ) from exc
 
 
-def _resolve_user(target: str | None = None, username: str | None = None) -> dict[str, Any]:
-    discovery = create_discovery()
-    users = discovery.list_users()
+def _resolve_user(
+    target: str | None = None,
+    username: str | None = None,
+    *,
+    discovery=None,
+) -> dict[str, Any]:
+    active_discovery = discovery or create_discovery()
+    users = active_discovery.list_users()
+    target_value = str(username or target or "").strip()
     if target and is_uuid_like(target):
         for item in users:
             if str(item.get("id")) == target:
                 return item
-    wanted = _lower(username or target)
-    matches = [item for item in users if wanted and wanted in {_lower(item.get("username")), _lower(item.get("name"))}]
+    parsed_display = _parse_display_style_user(target_value)
+    if parsed_display is not None:
+        wanted_username = _lower(parsed_display.get("username"))
+        wanted_name = _lower(parsed_display.get("name"))
+        matches = [
+            item
+            for item in users
+            if wanted_username
+            and _lower(item.get("username")) == wanted_username
+            and (not wanted_name or _lower(item.get("name")) == wanted_name)
+        ]
+    else:
+        wanted = _lower(target_value)
+        matches = [item for item in users if wanted and wanted in {_lower(item.get("username")), _lower(item.get("name"))}]
     if not matches:
-        raise CLIError("Unable to resolve user from the provided identifier.", payload={"user": username or target})
+        raise CLIError(
+            "无法解析用户标识。",
+            payload=build_cli_guidance_payload(
+                "user_not_found",
+                user_message="当前组织下找不到你指定的用户，请改用更精确的用户名、显示名或用户 UUID。",
+                action_hint="可以先用 `resolve --resource user --name <用户名>` 确认唯一用户对象。",
+                user=target_value,
+            ),
+        )
     if len(matches) > 1:
-        raise CLIError("Multiple users matched the provided identifier.", payload={"candidates": matches[:10]})
+        raise CLIError(
+            "用户标识匹配到多个候选对象。",
+            payload=build_cli_guidance_payload(
+                "ambiguous_user",
+                user_message="当前输入命中了多个用户，请改用更精确的用户名或直接使用用户 UUID。",
+                action_hint="建议先执行 `resolve --resource user --name <关键字>` 查看候选对象。",
+                candidates=matches[:10],
+            ),
+        )
     return matches[0]
 
 
-def _resolve_asset(target: str | None = None, name: str | None = None) -> dict[str, Any]:
-    discovery = create_discovery()
-    assets = discovery.list_assets()
+def _resolve_asset(
+    target: str | None = None,
+    name: str | None = None,
+    *,
+    discovery=None,
+) -> dict[str, Any]:
+    active_discovery = discovery or create_discovery()
+    assets = active_discovery.list_assets()
+    target_value = str(name or target or "").strip()
     if target and is_uuid_like(target):
         for item in assets:
             if str(item.get("id")) == target:
                 return item
-    wanted = _lower(name or target)
-    matches = [item for item in assets if wanted and wanted in {_lower(item.get("name")), _lower(item.get("address"))}]
+    parsed_display = _parse_display_style_asset(target_value)
+    if parsed_display is not None:
+        wanted_address = _lower(parsed_display.get("address"))
+        wanted_name = _lower(parsed_display.get("name"))
+        matches = [
+            item
+            for item in assets
+            if wanted_address
+            and _lower(item.get("address")) == wanted_address
+            and (not wanted_name or _lower(item.get("name")) == wanted_name)
+        ]
+    else:
+        wanted = _lower(target_value)
+        matches = [item for item in assets if wanted and wanted in {_lower(item.get("name")), _lower(item.get("address"))}]
     if not matches:
-        raise CLIError("Unable to resolve asset from the provided identifier.", payload={"asset": name or target})
+        raise CLIError(
+            "无法解析资产标识。",
+            payload=build_cli_guidance_payload(
+                "asset_not_found",
+                user_message="当前组织下找不到你指定的资产，请改用更精确的资产名称、地址或资产 UUID。",
+                action_hint="可以先用 `resolve --resource asset --name <资产名>` 确认唯一资产对象。",
+                asset=target_value,
+            ),
+        )
     if len(matches) > 1:
-        raise CLIError("Multiple assets matched the provided identifier.", payload={"candidates": matches[:10]})
+        raise CLIError(
+            "资产标识匹配到多个候选对象。",
+            payload=build_cli_guidance_payload(
+                "ambiguous_asset",
+                user_message="当前输入命中了多个资产，请改用更精确的名称、地址或直接使用资产 UUID。",
+                action_hint="建议先执行 `resolve --resource asset --name <关键字>` 查看候选对象。",
+                candidates=matches[:10],
+            ),
+        )
     return matches[0]
+
+
+def _resolve_account(
+    target: str | None = None,
+    *,
+    discovery=None,
+) -> dict[str, Any]:
+    active_discovery = discovery or create_discovery()
+    accounts = active_discovery.list_accounts()
+    target_value = str(target or "").strip()
+    if target_value and is_uuid_like(target_value):
+        for item in accounts:
+            if str(item.get("id")) == target_value:
+                return item
+    parsed_display = _parse_display_style_account(target_value)
+    if parsed_display is not None:
+        wanted_username = _lower(parsed_display.get("username"))
+        wanted_name = _lower(parsed_display.get("name"))
+        matches = [
+            item
+            for item in accounts
+            if wanted_username
+            and _lower(item.get("username")) == wanted_username
+            and (not wanted_name or _lower(item.get("name")) == wanted_name)
+        ]
+    else:
+        wanted = _lower(target_value)
+        matches = [item for item in accounts if wanted and wanted in {_lower(item.get("username")), _lower(item.get("name"))}]
+    if not matches:
+        raise CLIError(
+            "无法解析资产账号标识。",
+            payload=build_cli_guidance_payload(
+                "account_not_found",
+                user_message="当前组织下找不到你指定的资产账号，请改用更精确的账号名称、用户名或账号 UUID。",
+                action_hint="如果页面里看到的是 `名称(username)`，建议直接按这个格式输入。",
+                account=target_value,
+            ),
+        )
+    if len(matches) > 1:
+        raise CLIError(
+            "资产账号标识匹配到多个候选对象。",
+            payload=build_cli_guidance_payload(
+                "ambiguous_account",
+                user_message="当前输入命中了多个资产账号，请改用更精确的 `名称(username)` 或直接使用账号 UUID。",
+                action_hint="如果已知页面显示值，建议直接输入完整的 `名称(username)`。",
+                candidates=matches[:10],
+            ),
+        )
+    return matches[0]
+
+
+def node_full_value(node_lookup, node_id: str, *, fallback_name: str | None = None) -> str:
+    node = node_lookup.get(node_id) or {}
+    full_value = str(node.get("full_value") or "").strip()
+    if full_value:
+        return full_value
+    fallback = str(fallback_name or "").strip()
+    if fallback.startswith("/"):
+        return fallback
+    name = str(node.get("value") or node.get("name") or fallback).strip()
+    return "/%s" % name if name else ""
+
+
+def build_node_lookup(*, discovery=None) -> dict[str, dict[str, Any]]:
+    active_discovery = discovery or create_discovery()
+    return {
+        str(item.get("id") or "").strip(): item
+        for item in active_discovery.list_nodes()
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+
+
+def _asset_node_paths(asset: dict[str, Any], *, node_lookup) -> list[dict[str, Any]]:
+    paths: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for node in asset.get("nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
+        node_id = str(node.get("id") or "").strip()
+        resolved_path = node_full_value(
+            node_lookup,
+            node_id,
+            fallback_name=str(node.get("full_value") or node.get("name") or node.get("value") or ""),
+        )
+        if not resolved_path or resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+        paths.append(
+            {
+                "path": resolved_path,
+                "node_id": node_id or None,
+                "node_name": str(node.get("name") or node.get("value") or "").strip() or None,
+                "source": "asset.nodes",
+            }
+        )
+    for display in asset.get("nodes_display", []) or []:
+        display_text = str(display or "").strip()
+        if not display_text or display_text in seen_paths:
+            continue
+        seen_paths.add(display_text)
+        paths.append({"path": display_text, "node_id": None, "node_name": None, "source": "asset.nodes_display"})
+    return paths
+
+
+def _permission_node_paths(permission: dict[str, Any], *, node_lookup) -> list[dict[str, Any]]:
+    paths: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
+    for node in permission.get("nodes", []) or []:
+        if isinstance(node, dict):
+            node_id = str(node.get("id") or "").strip()
+            fallback_name = str(node.get("full_value") or node.get("name") or node.get("value") or "")
+            resolved_path = node_full_value(node_lookup, node_id, fallback_name=fallback_name)
+            node_name = str(node.get("name") or node.get("value") or "").strip() or None
+        else:
+            node_id = str(node or "").strip()
+            resolved_path = node_full_value(node_lookup, node_id, fallback_name=node_id)
+            node_name = None
+        if not resolved_path or resolved_path in seen_paths:
+            continue
+        seen_paths.add(resolved_path)
+        paths.append(
+            {
+                "path": resolved_path,
+                "node_id": node_id or None,
+                "node_name": node_name,
+                "source": "permission.nodes",
+            }
+        )
+    return paths
+
+
+def match_permission_to_asset(permission: dict[str, Any], asset: dict[str, Any], *, node_lookup) -> dict[str, Any] | None:
+    asset_id = str(asset.get("id") or "").strip()
+    permission_asset_ids = {
+        str(obj.get("id", obj)).strip()
+        for obj in permission.get("assets", []) or []
+        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
+    }
+    if asset_id and asset_id in permission_asset_ids:
+        return {
+            "match_source": "direct_asset",
+            "match_evidence": {
+                "matched_asset_id": asset_id,
+                "permission_asset_ids": sorted(permission_asset_ids),
+            },
+        }
+
+    asset_label_ids = {
+        str(obj.get("id", obj)).strip()
+        for obj in asset.get("labels", []) or []
+        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
+    }
+    permission_label_ids = {
+        str(obj.get("id", obj)).strip()
+        for obj in permission.get("labels", []) or []
+        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
+    }
+    matched_label_ids = sorted(asset_label_ids & permission_label_ids)
+    if matched_label_ids:
+        return {
+            "match_source": "shared_label",
+            "match_evidence": {
+                "matched_label_ids": matched_label_ids,
+                "asset_label_ids": sorted(asset_label_ids),
+                "permission_label_ids": sorted(permission_label_ids),
+            },
+        }
+
+    asset_paths = _asset_node_paths(asset, node_lookup=node_lookup)
+    permission_paths = _permission_node_paths(permission, node_lookup=node_lookup)
+    path_matches: list[dict[str, Any]] = []
+    for asset_path in asset_paths:
+        asset_value = str(asset_path.get("path") or "").strip()
+        if not asset_value:
+            continue
+        for permission_path in permission_paths:
+            permission_value = str(permission_path.get("path") or "").strip()
+            if not permission_value:
+                continue
+            prefix = permission_value.rstrip("/") + "/"
+            if asset_value == permission_value or asset_value.startswith(prefix):
+                depth = len([part for part in permission_value.split("/") if part])
+                path_matches.append(
+                    {
+                        "depth": depth,
+                        "asset_path": asset_path,
+                        "permission_path": permission_path,
+                        "relationship": "exact" if asset_value == permission_value else "ancestor_prefix",
+                    }
+                )
+    if path_matches:
+        best_match = sorted(
+            path_matches,
+            key=lambda item: (
+                int(item.get("depth") or 0),
+                len(str((item.get("permission_path") or {}).get("path") or "")),
+            ),
+            reverse=True,
+        )[0]
+        return {
+            "match_source": "node_ancestor",
+            "match_evidence": {
+                "relationship": best_match["relationship"],
+                "matched_asset_path": best_match["asset_path"],
+                "matched_permission_path": best_match["permission_path"],
+                "asset_node_paths": asset_paths,
+                "permission_node_paths": permission_paths,
+            },
+        }
+    return None
+
+
+def explain_asset_permissions(
+    asset: dict[str, Any],
+    *,
+    client=None,
+    discovery=None,
+) -> dict[str, Any]:
+    active_client = client or create_client()
+    active_discovery = discovery or create_discovery()
+    node_lookup = build_node_lookup(discovery=active_discovery)
+    matched_permissions = []
+    for item in _list_permissions(client=active_client):
+        permission_id = str(item.get("id") or "").strip()
+        if not permission_id:
+            continue
+        detail = active_client.get("%s%s/" % (PERMISSION_PATH, permission_id))
+        if not isinstance(detail, dict):
+            continue
+        match = match_permission_to_asset(detail, asset, node_lookup=node_lookup)
+        if not match:
+            continue
+        matched_permissions.append(
+            {
+                "id": detail.get("id"),
+                "name": detail.get("name"),
+                "match_source": match["match_source"],
+                "match_evidence": match["match_evidence"],
+            }
+        )
+    return {
+        "asset": asset,
+        "matched_permission_count": len(matched_permissions),
+        "matched_permissions": matched_permissions,
+    }
 
 
 def command_records(filters: dict[str, Any]) -> dict[str, Any]:
@@ -933,7 +2395,7 @@ def _is_failed_login(item: dict[str, Any]) -> bool:
 
 
 def _login_records(filters: dict[str, Any]) -> list[dict[str, Any]]:
-    payload = _normalize_time_filters(filters)
+    payload = _normalize_login_audit_filters(_normalize_time_filters(filters))
     records = _apply_common_filters(_fetch_list("/api/v1/audits/login-logs/", payload), payload)
     if filters.get("status"):
         records = [item for item in records if _match_text(_extract_status(item), filters["status"])]
@@ -1778,9 +3240,13 @@ def system_settings_overview(filters: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _settings_payload(category: str | None = None) -> Any:
+def _settings_payload(category: str | None = None, *, setting_id: str | None = None) -> Any:
     client = create_client()
-    params = {"category": category} if category else None
+    params = {}
+    if category:
+        params["category"] = category
+    if str(setting_id or "").strip():
+        params["id"] = str(setting_id).strip()
     return client.get("/api/v1/settings/setting/", params=params)
 
 
@@ -1868,14 +3334,22 @@ def terminal_access_policy_check(filters: dict[str, Any]) -> dict[str, Any]:
 
 def setting_category_query(filters: dict[str, Any]) -> dict[str, Any]:
     category = str(filters.get("category") or "").strip()
+    setting_id = str(filters.get("id") or "").strip()
     if not category:
-        raise CLIError("setting-category-query requires filters.category, e.g. {\"category\":\"security_auth\"}.")
-    payload = _settings_payload(category=category)
+        raise CLIError(
+            "缺少设置分类参数。",
+            payload=build_cli_guidance_payload(
+                "missing_setting_category",
+                user_message="请通过 `--category` 指定要查询的设置分类，例如 `security_auth`。",
+                action_hint="推荐使用 `python3 scripts/jumpserver_api/jms_diagnose.py settings-category --category security_auth`。",
+            ),
+        )
+    payload = _settings_payload(category=category, setting_id=setting_id or None)
     records = payload if isinstance(payload, list) else [payload]
     records = [item for item in records if item not in (None, "")]
     return _with_org_context(
         {
-            "summary": {"category": category, "total": len(records)},
+            "summary": {"category": category, "id": setting_id or None, "total": len(records)},
             "records": records,
         }
     )
@@ -1893,28 +3367,23 @@ def license_detail_query(filters: dict[str, Any]) -> dict[str, Any]:
 
 
 def ticket_list_query(filters: dict[str, Any]) -> dict[str, Any]:
-    payload = dict(filters)
+    payload = _normalize_ticket_filters(dict(filters))
     rows = _fetch_list("/api/v1/tickets/tickets/", payload)
     match_strategy = "server"
-    name_filter = payload.get("name") or payload.get("title")
-    if name_filter:
-        filtered = _exact_first_filter(rows, name_filter, "title", "serial_num", "comment")
-        if filtered:
-            if filtered != rows:
-                match_strategy = "local_exact_first"
-            rows = filtered
-        else:
-            fallback_filters = dict(payload)
-            fallback_filters.pop("name", None)
-            fallback_filters.pop("title", None)
-            fallback_filters.pop("search", None)
-            broader_rows = _fetch_list("/api/v1/tickets/tickets/", fallback_filters)
-            rows = _exact_first_filter(broader_rows, name_filter, "title", "serial_num", "comment")
-            match_strategy = "local_exact_first_broad_fetch"
+    if payload.get("search") not in {None, ""}:
+        match_strategy = "server_search"
+    for key, strategy_name in (
+        ("applicant_username_name", "server_applicant_exact"),
+        ("state", "server_state_exact"),
+        ("type", "server_type_exact"),
+    ):
+        if payload.get(key) not in {None, ""}:
+            match_strategy = strategy_name if match_strategy == "server" else "%s+%s" % (match_strategy, strategy_name)
     return _with_org_context(
         {
             "summary": {
                 "ticket_count": len(rows),
+                "filter_strategy": match_strategy,
                 "match_strategy": match_strategy,
                 "filters": {key: value for key, value in payload.items() if not str(key).startswith("_")},
             },
@@ -1951,30 +3420,55 @@ def terminal_component_query(filters: dict[str, Any]) -> dict[str, Any]:
     return _with_org_context({"summary": {"terminal_count": len(rows)}, "records": _sample(rows, size=int(filters.get("limit") or 50))})
 
 
+def _report_server_filters(report_type: str, filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _server_filters(filters)
+    if report_type in REPORT_TYPES_WITH_NATIVE_DAYS:
+        payload.pop("date_from", None)
+        payload.pop("date_to", None)
+    if report_type == "pam-dashboard":
+        payload.pop("days", None)
+        payload.pop("date_from", None)
+        payload.pop("date_to", None)
+        for field in PAM_DASHBOARD_FLAG_FIELDS:
+            if filters.get(field) not in {None, "", False}:
+                payload[field] = int(filters.get(field))
+    if report_type == "change-secret-dashboard":
+        for field in CHANGE_SECRET_DASHBOARD_FLAG_FIELDS:
+            if filters.get(field) not in {None, "", False}:
+                payload[field] = int(filters.get(field))
+    return payload
+
+
 def report_query(filters: dict[str, Any]) -> dict[str, Any]:
     report_type = str(filters.get("report_type") or "").strip()
     if not report_type:
-        raise CLIError("report-query requires filters.report_type, e.g. {\"report_type\":\"account-statistic\",\"days\":30}.")
-    report_paths = {
-        "account-statistic": "/api/v1/reports/reports/account-statistic/",
-        "account-automation": "/api/v1/reports/reports/account-automation/",
-        "asset-statistic": "/api/v1/reports/reports/asset-statistic/",
-        "asset-activity": "/api/v1/reports/reports/asset-activity/",
-        "users": "/api/v1/reports/reports/users/",
-        "user-change-password": "/api/v1/reports/reports/user-change-password/",
-        "pam-dashboard": "/api/v1/accounts/pam-dashboard/",
-        "change-secret-dashboard": "/api/v1/accounts/change-secret-dashboard/",
-    }
-    path = report_paths.get(report_type)
+        raise CLIError(
+            "缺少报表类型参数。",
+            payload=build_cli_guidance_payload(
+                "missing_report_type",
+                user_message="请通过 `--report-type` 指定要读取的报表类型。",
+                action_hint="推荐使用 `python3 scripts/jumpserver_api/jms_diagnose.py reports --report-type account-statistic --days 30`。",
+            ),
+        )
+    path = REPORT_PATHS.get(report_type)
     if path is None:
-        raise CLIError("Unsupported report_type: %s" % report_type)
+        raise CLIError(
+            "不支持的报表类型：%s" % report_type,
+            payload=build_cli_guidance_payload(
+                "unsupported_report_type",
+                user_message="当前 `--report-type` 不在支持列表中，请改用帮助页里列出的类型。",
+                action_hint="可先执行 `python3 scripts/jumpserver_api/jms_diagnose.py reports --help` 查看支持值。",
+                report_type=report_type,
+            ),
+        )
     client = create_client()
-    payload = client.get(path, params=_server_filters(filters))
+    params = _report_server_filters(report_type, filters)
+    payload = client.get(path, params=params)
     records = payload if isinstance(payload, list) else [payload]
     records = [item for item in records if item not in (None, "")]
     return _with_org_context(
         {
-            "summary": {"report_type": report_type, "total": len(records)},
+            "summary": {"report_type": report_type, "total": len(records), "request_params": params},
             "records": records,
         }
     )
