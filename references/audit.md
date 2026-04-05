@@ -1,5 +1,14 @@
 # 审计与调查
 
+## 目录
+
+- [快速概览](#快速概览)
+- [页面同款直接查询](#页面同款直接查询)
+- [查询型时间语义](#查询型时间语义)
+- [audit-analyze --capability 适用场景](#audit-analyze---capability-适用场景)
+- [高频示例](#高频示例)
+- [统计口径与常见误区](#统计口径与常见误区)
+- [排障提示](#排障提示)
 ## 快速概览
 
 - 主入口：`python3 scripts/jumpserver_api/jms_query.py <subcommand> ...`

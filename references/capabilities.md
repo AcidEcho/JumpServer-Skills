@@ -1,5 +1,14 @@
 # 能力目录与优先级
 
+## 目录
+
+- [快速概览](#快速概览)
+- [使用规则](#使用规则)
+- [Capability Selection Rules](#capability-selection-rules)
+- [P0](#p0)
+- [P1](#p1)
+- [P2](#p2)
+- [待确认项](#待确认项)
 ## 快速概览
 
 - 这份文档是 `inspect/analyze + capability` 能力单元的人类索引。
@@ -24,6 +33,29 @@
 - 当用户问题天然跨多个接口时，优先使用能力单元，而不是手工拼接多个 `list/get`。
 - 当结果过多时，能力单元应优先返回统计摘要、Top 排行和样本记录。
 - inventory 未明确的接口或字段，不在这里硬写成“已确认能力”；相关事项统一标记为“待确认”。
+
+## Capability Selection Rules
+
+- 跨多个接口的聚合统计、排行、趋势、分布、TOP 问题，优先 capability。
+- 需要页面同款单条明细、详情页或精确列表时，优先直接子命令，不强行走 capability。
+- 需要系统巡检、治理盘点、配置检查、账号/资产治理时，优先 `jms_diagnose.py inspect --capability ...`。
+- 需要会话、命令、文件传输、异常登录这类分析型审计时，优先 `jms_query.py audit-analyze --capability ...`。
+- 需要单对象读取、单条权限详情或明确的 effective access 结果时，不要用 capability 替代正式直读入口。
+
+### 常见问法 -> 推荐 capability
+
+| 常见问法 | 推荐 capability | 入口 |
+|---|---|---|
+| 最近 7 天谁操作最频繁 | `frequent-operation-user-ranking` | `jms_query.py audit-analyze` |
+| 某用户某天连接过哪些机器 / 会话有多少 | `session-record-query` | `jms_query.py audit-analyze` |
+| 最近 30 天高危命令有哪些 | `high-risk-command-audit` | `jms_query.py audit-analyze` |
+| 最近 30 天失败登录最多的是谁 | `failed-login-statistics` | `jms_query.py audit-analyze` |
+| 最近一周最活跃的资产有哪些 | `recent-active-assets-ranking` | `jms_diagnose.py inspect` |
+| 哪些资产长期未使用 | `long-time-unused-assets` | `jms_diagnose.py inspect` |
+| 哪些账号长期未使用 | `long-time-unused-accounts` | `jms_diagnose.py inspect` |
+| 系统设置总览 / 安全配置检查 | `system-settings-overview` / `security-policy-check` | `jms_diagnose.py inspect` |
+| 命令存储 / 回放存储配置 | `command-storage-query` / `replay-storage-query` | `jms_diagnose.py inspect` |
+| 账号自动化与风险概览 | `account-automation-overview` | `jms_diagnose.py inspect` |
 
 ## P0
 

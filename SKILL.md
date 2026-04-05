@@ -13,6 +13,14 @@ description: JumpServer V4.10 查询、诊断与使用分析 skill。Use when us
 
 这是查询、诊断与使用分析 skill。允许本地运行时写入 `config-write --confirm` 和 `select-org --confirm`。不执行 JumpServer 业务写操作。
 
+## Execution Skeleton
+
+1. 先做预检：`config-status --json` -> 必要时 `config-write --confirm` -> `ping`。
+2. 按路由和组织优先级只选择 1 个正式入口执行普通查询。
+3. 某天或某时间段的使用报告 / 使用分析优先走 `python3 scripts/jumpserver_api/jms_report.py daily-usage ...`。
+4. 组织、对象、平台或时间窗不明确时先阻塞或解析，不猜。
+5. 只做读取、诊断、审计、治理分析；不做 JumpServer 业务写操作。
+
 ## Quick Examples
 
 优先使用当前显式参数；低频页面字段再用重复的 `--filter key=value`。
@@ -204,6 +212,20 @@ python3 scripts/jumpserver_api/jms_report.py daily-usage --period 上周 --org-n
 - 当用户问“某天连接了哪些机器”时，先从 `records` 按用户分组，再提取每个用户对应的去重资产名称。
 - 报告格式优先写成“用户 -> 机器列表”，不要直接把 `top_assets` 当作某个用户的连接矩阵。
 - 只有在缺少 `records` 且工具明确只返回部分榜单时，才能保守表述“根据已返回榜单/样本数据”，不要伪造全量结论。
+
+## Reference Loading Guide
+
+- 查对象、资产、账号、用户、节点、平台与组织时，读 [references/assets.md](references/assets.md)。
+- 查授权主体、ACL、RBAC、权限详情、资产授权解释时，读 [references/permissions.md](references/permissions.md)。
+- 查页面同款登录、会话、命令、文件传输、作业与审计分析时，读 [references/audit.md](references/audit.md)。
+- 查预检、配置、组织、select-org、config-write、连通性时，读 [references/runtime.md](references/runtime.md)。
+- 查 resolve、effective access、settings、license、tickets、reports、inspect 时，读 [references/diagnose.md](references/diagnose.md)。
+- 查报告模板、日报、某天/某时间段使用分析与报告口径时，读 [references/report-template-playbook.md](references/report-template-playbook.md)。
+- 查 capability 目录、优先级和 capability 选择时，读 [references/capabilities.md](references/capabilities.md)。
+- 查阻塞、参数报错、依赖失败、空结果与排障建议时，读 [references/troubleshooting.md](references/troubleshooting.md)。
+- 查安全边界和禁止动作时，读 [references/safety-rules.md](references/safety-rules.md)。
+- 查旧能力迁移、设计映射或历史能力拆分时，读 [references/migration-map.md](references/migration-map.md)。
+- 查自然语言对象映射、资源归一化与歧义处理时，读 [references/object-map.md](references/object-map.md)。
 
 ## References
 

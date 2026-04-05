@@ -1,5 +1,13 @@
 # 诊断与访问分析
 
+## 目录
+
+- [快速概览](#快速概览)
+- [常用子命令](#常用子命令)
+- [有效访问范围](#有效访问范围)
+- [`recent-audit` 页面同款参数面](#recent-audit-页面同款参数面)
+- [报表与 dashboard](#报表与-dashboard)
+- [高频示例](#高频示例)
 ## 快速概览
 
 - 主入口：`python3 scripts/jumpserver_api/jms_diagnose.py <subcommand> ...`
