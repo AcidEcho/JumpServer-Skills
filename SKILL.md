@@ -1,6 +1,17 @@
 ---
 name: jumpserver-skills
-description: JumpServer V4.10 main routing skill. Use when users ask to query JumpServer objects, access, permissions, audit logs, reports, inspections, runtime config checks, connectivity checks, organization selection, create users, user groups, organizations, host/device/database/web assets, zones, gateways, account templates, add accounts or account templates to assets, command groups, command filter rules, login ACLs, connect method ACLs, asset permissions, login asset ACLs, data masking rules, or reserve update workflows.
+description: >
+  JumpServer V4.10 main routing skill. Use when users ask to query JumpServer objects,
+  access, permissions, audit logs, reports, inspections, runtime config checks,
+  connectivity checks, organization selection, create users, user groups, organizations,
+  host/device/database/web assets, zones, gateways, account templates, add accounts or
+  account templates to assets, command groups, command filter rules, login ACLs, connect
+  method ACLs, asset permissions, login asset ACLs, data masking rules, or reserve update
+  workflows. 中文创建触发词：创建用户、创建用户组、创建组织、邀请用户、添加用户到用户组、
+  创建标签、创建节点、创建主机资产、创建网络设备资产、创建数据库资产、创建 Web 资产、
+  创建网域、创建网关、创建账号模板、批量添加资产账号、绑定账号模板到资产、创建命令组、
+  创建命令过滤规则、创建登录控制、创建连接方式过滤器、创建资产授权规则、创建资产连接规则、
+  创建数据脱敏规则。
 ---
 
 # JumpServer Skills
@@ -34,6 +45,7 @@ python3 subskills/common/scripts/jms_common.py ping
 - 未被 [references/routing-and-safety.md](references/routing-and-safety.md) 明确声明的写操作一律阻塞。
 - 本版 JumpServer 业务写操作仅开放：`create-user`、`create-user-group`、`create-organization`、`invite-user-to-org`、`add-user-to-user-group`、`create-label`、`create-node`、`create-host-asset`、`create-device-asset`、`create-database-asset`、`create-web-asset`、`create-zone`、`create-gateway`、`create-account-template`、`add-account-to-assets`、`add-account-template-to-assets`、`create-command-group`、`create-command-filter-rule`、`create-login-acl`、`create-connect-method-acl`、`create-asset-permission`、`create-login-asset-acl`、`create-data-masking-rule`，且必须 `--confirm`。
 - 允许本地运行时写入：`config-write --confirm`、`select-org --confirm`。
+- dry-run、成功和错误输出中不回显密文字段或密文语义字段，包括 `secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`。
 - 不猜对象 ID、平台 ID、组织、鉴权信息或筛选条件。
 - 不生成临时 SDK Python 脚本或 HTTP 脚本绕过正式入口。
 

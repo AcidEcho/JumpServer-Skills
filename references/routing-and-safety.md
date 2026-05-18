@@ -17,6 +17,7 @@
 - 不生成临时 SDK Python 脚本或 HTTP 脚本绕过正式入口。
 - 配置、组织或连通性不确定时，先走 `jms_common.py config-status --json` 和 `jms_common.py ping`。
 - 对象 ID、平台 ID、组织、鉴权信息或筛选条件不明确时，先查询或解析，不猜测。
+- dry-run、成功和错误输出中不回显密文字段或密文语义字段，包括 `secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`。
 
 ## 允许写操作
 
@@ -24,18 +25,18 @@
 |---|---|---|
 | 本地配置写入 | `jms_common.py config-write --confirm` | 只写本地 `.env` |
 | 当前组织切换 | `jms_common.py select-org --confirm` | 只写 `.env JMS_ORG_ID` |
-| 创建用户 | `jms_create_user.py create-user --confirm` | 先查重，密码脱敏 |
+| 创建用户 | `jms_create_user.py create-user --confirm` | 先查重，密文字段或密文语义字段脱敏 |
 | 创建用户组 | `jms_create_user_group.py create-user-group --confirm` | 先查重，成员只接受用户 ID |
 | 创建组织 | `jms_create_org.py create-organization --confirm` | 请求不带 `X-JMS-ORG`，成功后不切换当前组织 |
 | 邀请用户加入组织 | `jms_invite_user.py invite-user-to-org --confirm` | 用户从全局组织解析，角色在目标组织解析 |
 | 添加用户到用户组 | `jms_add_user_to_group.py add-user-to-user-group --confirm` | 用户和用户组都在目标组织解析 |
 | 创建标签 | `jms_create_label.py create-label --confirm` | 先查重，只在目标组织创建；全局组织禁止 |
 | 创建节点 | `jms_create_node.py create-node --confirm` | 只发送 `org_id/full_value/value`；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
-| 创建主机/网络设备/数据库/Web 资产 | `jms_create_asset.py create-host-asset/create-device-asset/create-database-asset/create-web-asset --confirm` | 以完整 `--payload` 为主；`platform/nodes/labels/zone/accounts[].template` 支持解析；未传 `protocols` 时按平台默认协议补齐；密文字段脱敏；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
+| 创建主机/网络设备/数据库/Web 资产 | `jms_create_asset.py create-host-asset/create-device-asset/create-database-asset/create-web-asset --confirm` | 以完整 `--payload` 为主；`platform/nodes/labels/zone/accounts[].template` 支持解析；未传 `protocols` 时按平台默认协议补齐；密文字段或密文语义字段脱敏；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
 | 创建网域 | `jms_create_zone_gateway.py create-zone --confirm` | 只发送 `name/assets/comment`；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
 | 创建网关机器 | `jms_create_zone_gateway.py create-gateway --confirm` | 以完整 `--payload` 为主；`platform/zone/nodes/labels` 支持解析；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
-| 创建账号模板 | `jms_create_account_template.py create-account-template --confirm` | 以完整 `--payload` 为主；`su_from/platforms` 支持解析；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
-| 给资产批量添加账号 | `jms_asset_account_bulk.py add-account-to-assets --confirm` | 以完整 `--payload` 为主；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
+| 创建账号模板 | `jms_create_account_template.py create-account-template --confirm` | 以完整 `--payload` 为主；`su_from/platforms` 支持解析；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段或密文语义字段脱敏 |
+| 给资产批量添加账号 | `jms_asset_account_bulk.py add-account-to-assets --confirm` | 以完整 `--payload` 为主；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段或密文语义字段脱敏 |
 | 给资产或节点批量添加账号模板 | `jms_asset_account_bulk.py add-account-template-to-assets --confirm` | 以完整 `--payload` 为主；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止 |
 | 创建命令组 | `jms_create_command_acl.py create-command-group --confirm` | 只发送 `type/ignore_case/name/content/comment`；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
 | 创建命令过滤规则 | `jms_create_command_acl.py create-command-filter-rule --confirm` | 以完整 `--payload` 为主；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
