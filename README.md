@@ -2,7 +2,7 @@
 
 `jumpserver-skills` 是一个面向 JumpServer V4.10 的查询、审计分析与模板化使用报告 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析，以及某一天或某一段时间的堡垒机使用报告。它更像一套可复用的 skill 规则与正式入口封装，而不是要求使用者手动拼接脚本命令的 CLI 教程。
 
-仓库内部会按请求类型自动路由到 `jms_query.py`、`jms_diagnose.py`、`jms_report.py` 三类正式入口。默认保持只读，仅允许本地运行时写入 `.env` 和当前组织上下文，不执行 JumpServer 业务写操作。
+仓库内部会按请求类型自动路由到 `subskills/*/scripts/jms_*.py` 子 Skill 正式入口。默认保持只读，仅允许本地运行时写入 `.env` 配置，仅开放已声明的 `create-user`、`create-user-group`、`create-organization`、`invite-user-to-org`、`add-user-to-user-group`、`create-label`、`create-node`、`create-host-asset`、`create-device-asset`、`create-database-asset`、`create-web-asset`、`create-zone`、`create-gateway`、`create-account-template`、`add-account-to-assets`、`add-account-template-to-assets`、`create-command-group`、`create-command-filter-rule`、`create-login-acl`、`create-connect-method-acl`、`create-asset-permission`、`create-login-asset-acl` 与 `create-data-masking-rule` 写操作。
 
 [English](./README.en.md)
 
@@ -19,12 +19,30 @@
 | 能力分组 | 适合处理的请求 | 入口名称 | 说明 |
 |---|---|---|---|
 | 对象查询 | 资产、账号、用户、用户组、组织、平台、节点、标签、网域查询 | `jms_query.py` | 适合精确查询对象清单或读取单个对象详情 |
-| 权限关系 | 授权规则、ACL、RBAC、资产授权给了谁、谁能访问某资产、某条权限详情 | `jms_query.py` / `jms_diagnose.py` | 默认区分“授权主体”和“实际可访问者”，不把超级管理员默认混入授权主体 |
-| 审计调查 | 登录、会话、命令、文件传输、异常行为、高危命令、失败登录调查 | `jms_query.py` | 适合日志、记录、明细、详情类请求 |
-| 配置与诊断 | 配置检查、连通性、组织切换、对象解析、许可证、系统设置、存储、工单 | `jms_diagnose.py` | 适合预检、环境确认和治理前置检查 |
-| 用户有效访问范围 | 某某用户有哪些资产、某某用户在某组织下有哪些节点、某某用户在某资产下有哪些账号/协议 | `jms_diagnose.py` | 优先返回 effective access 结果，不默认展开授权规则说明；资产/节点清单以 `user-assets` / `user-nodes` 为准 |
-| 治理巡检 | 资产治理、账号治理、访问分析、系统巡检、capability 聚合分析 | `jms_diagnose.py` | 优先走能力化聚合，而不是让使用者手工拼零散查询 |
+| 权限关系 | 授权规则、ACL、RBAC、资产授权给了谁、谁能访问某资产、某条权限详情 | `jms_permissions.py` | 默认区分“授权主体”和“实际可访问者”，不把超级管理员默认混入授权主体 |
+| 审计调查 | 登录、会话、命令、文件传输、异常行为、高危命令、失败登录调查 | `jms_audit.py` | 适合日志、记录、明细、详情类请求 |
+| 公共预检 | 配置检查、连通性、组织切换、端点验证 | `jms_common.py` | 适合所有业务能力执行前的环境确认 |
+| 只读运行时查询 | 对象解析、平台解析、许可证、系统设置、存储、工单、报表原始数据 | `jms_query.py` / `jms_runtime_query.py` | 属于查询类能力，统一放在 query 子 Skill |
+| 用户有效访问范围 | 某某用户有哪些资产、某某用户在某组织下有哪些节点、某某用户在某资产下有哪些账号/协议 | `jms_access.py` | 优先返回 effective access 结果，不默认展开授权规则说明；资产/节点清单以 `user-assets` / `user-nodes` 为准 |
+| 治理巡检 | 资产治理、账号治理、访问分析、系统巡检、capability 聚合分析 | `jms_inspect.py` | 优先走能力化聚合，而不是让使用者手工拼零散查询 |
 | 使用报告 | 日报、使用情况、使用分析、某天发生了什么、某时间段排行或概览 | `jms_report.py` | 这类请求默认输出完整 HTML 报告，而不是只给一句摘要 |
+| 创建用户 | 创建 JumpServer 本地用户 | `jms_create_user.py` | 无 `--confirm` 只预览；有 `--confirm` 才创建，创建前查重且密码脱敏 |
+| 创建用户组 | 创建 JumpServer 用户组，可加入多个用户 ID | `jms_create_user_group.py` | 无 `--confirm` 只预览；有 `--confirm` 才查重并创建；成员通过多个 `--user <user-id>` 添加 |
+| 创建组织 | 创建 JumpServer 组织 | `jms_create_org.py` | 无 `--confirm` 只预览；有 `--confirm` 才查重并创建；请求不带 `X-JMS-ORG` |
+| 邀请用户加入组织 | 把全局可见用户邀请到目标组织 | `jms_invite_user.py` | 无 `--confirm` 只预览；有 `--confirm` 才从全局组织解析用户并在目标组织邀请 |
+| 添加用户到用户组 | 把目标组织内用户加入目标组织内用户组 | `jms_add_user_to_group.py` | 无 `--confirm` 只预览；有 `--confirm` 才在目标组织解析用户和用户组并添加关系 |
+| 创建标签 | 创建 JumpServer 标签 | `jms_create_label.py` | 无 `--confirm` 只预览；有 `--confirm` 才在目标组织查重并创建；全局组织禁止 |
+| 创建节点 | 创建 JumpServer 资产节点 | `jms_create_node.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/assets/nodes/`；显式组织只限定本次命令，不写 `.env`；全局组织禁止 |
+| 创建主机/网络设备/数据库/Web 资产 | 创建 JumpServer 资产 | `jms_create_asset.py` | 无 `--confirm` 只预览；有 `--confirm` 才解析 `platform/nodes/labels/zone/accounts[].template`、查重并创建；未传协议按平台默认协议补齐；密文字段脱敏；全局组织禁止 |
+| 创建网域/网关机器 | 创建 JumpServer 网域和网关机器 | `jms_create_zone_gateway.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/assets/zones/` 或 `/api/v1/assets/gateways/`；网关支持解析 `platform/zone/nodes/labels`；全局组织禁止 |
+| 创建账号模板 | 创建 JumpServer 账号模板 | `jms_create_account_template.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/accounts/account-templates/`；`su_from/platforms` 支持解析；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
+| 给资产添加账号/账号模板 | 给某个资产或一批资产添加账号，或给资产/节点添加账号模板 | `jms_asset_account_bulk.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/accounts/accounts/bulk/`；显式组织只限定本次命令，不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
+| 创建命令组/命令过滤规则 | 创建 JumpServer 命令组和命令过滤规则 | `jms_create_command_acl.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/acls/command-groups/` 或 `/api/v1/acls/command-filter-acls/`；全局组织禁止 |
+| 创建用户登录控制 | 创建 JumpServer 用户登录控制 | `jms_create_login_acl.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/acls/login-acls/`；只能在全局组织下创建；不写 `.env` |
+| 创建连接方式过滤器 | 创建 JumpServer 连接方式过滤器 | `jms_create_connect_method_acl.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/acls/connect-method-acls/`；只能在全局组织下创建；不写 `.env` |
+| 创建资产授权规则 | 创建 JumpServer 资产授权规则 | `jms_create_asset_permission.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/perms/asset-permissions/`；全局组织禁止 |
+| 创建资产连接规则 | 创建 JumpServer 资产连接规则 | `jms_create_login_asset_acl.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/acls/login-asset-acls/`；全局组织禁止 |
+| 创建数据脱敏过滤规则 | 创建 JumpServer 数据脱敏过滤规则 | `jms_create_data_masking_rule.py` | 无 `--confirm` 只预览；有 `--confirm` 才 POST `/api/v1/acls/data-masking-rules/`；`accounts` 只支持 `@ALL/@SPEC`；全局组织禁止 |
 
 ## 怎么使用这个 skill
 
@@ -62,19 +80,19 @@ cp .env.example .env
 推荐写法：
 
 ```bash
-python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-name Default
-python3 scripts/jumpserver_api/jms_diagnose.py user-assets --org-name Default --username example.user
-python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --name Default
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --days 7 --user example.user
-python3 scripts/jumpserver_api/jms_diagnose.py inspect --capability hot-assets-ranking --days 30 --top 10
-python3 scripts/jumpserver_api/jms_diagnose.py reports --report-type account-statistic --days 30
+python3 subskills/common/scripts/jms_common.py select-org --org-name Default
+python3 subskills/query/scripts/jms_access.py user-assets --org-name Default --username example.user
+python3 subskills/query/scripts/jms_query.py object-list --resource organization --name Default
+python3 subskills/query/scripts/jms_audit.py audit-analyze --capability session-record-query --days 7 --user example.user
+python3 subskills/query/scripts/jms_inspect.py inspect --capability hot-assets-ranking --days 30 --top 10
+python3 subskills/query/scripts/jms_runtime_query.py reports --report-type account-statistic --days 30
 ```
 
 兼容写法：
 
 ```bash
-python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --filters '{"name":"Default"}'
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --filter user=example.user --filter days=7
+python3 subskills/query/scripts/jms_query.py object-list --resource organization --filters '{"name":"Default"}'
+python3 subskills/query/scripts/jms_audit.py audit-analyze --capability session-record-query --filter user=example.user --filter days=7
 ```
 
 列表型和分析型命令默认会自动翻页抓取并返回查询范围内的全部结果，不再支持 `--limit/--offset`。
@@ -89,7 +107,7 @@ python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-r
 
 - `JMS_API_URL`
 - 一组完整认证方式：`JMS_ACCESS_KEY_ID/JMS_ACCESS_KEY_SECRET` 或 `JMS_USERNAME/JMS_PASSWORD`
-- `JMS_ORG_ID`，不确定时可以先留空
+- `JMS_ORG_ID` 可先留空，之后用 `select-org --confirm` 写入
 - `JMS_TIMEOUT`，不填则使用默认值
 - `JMS_VERIFY_TLS`，不填时默认 `false`
 
@@ -100,7 +118,7 @@ python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-r
 | `JMS_ACCESS_KEY_SECRET` | 与 `JMS_ACCESS_KEY_ID` 成组，或改用用户名密码 | API Access Key Secret |
 | `JMS_USERNAME` | 与 `JMS_PASSWORD` 成组，或改用 AK/SK | JumpServer 登录用户名 |
 | `JMS_PASSWORD` | 与 `JMS_USERNAME` 成组，或改用 AK/SK | JumpServer 登录密码 |
-| `JMS_ORG_ID` | 初始化时可选 | 业务执行前会通过组织选择流程或保留组织规则写入 |
+| `JMS_ORG_ID` | 可选 | 当前组织 ID，可由 `select-org --confirm` 写入 |
 | `JMS_TIMEOUT` | 可选 | 请求超时秒数 |
 | `JMS_VERIFY_TLS` | 可选 | 是否校验证书，默认 `false` |
 
@@ -139,6 +157,7 @@ python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-r
 - `这台资产授权给了谁`、`谁被授权到这台资产` 默认回答授权主体，不默认把超级管理员算进去；只有用户明确要求“实际可访问者（含超管）”时才补充超级管理员集合。
 - `某天登录情况`、`某天会话概览`、`某时间段谁最多` 这类表达，属于报告/使用分析。
 - `某天登录日志`、`某天命令记录`、`某条会话详情` 这类表达，属于审计调查。
+- `创建用户`、`创建用户组`、`创建组织`、`邀请用户加入组织`、`添加用户到用户组`、`创建标签`、`创建节点`、`创建主机/网络设备/数据库/Web 资产`、`创建网域`、`创建网关机器`、`创建账号模板`、`给资产批量添加账号`、`给资产或节点批量添加账号模板`、`创建命令组`、`创建命令过滤规则`、`创建用户登录控制`、`创建连接方式过滤器`、`创建资产授权规则`、`创建资产连接规则`、`创建数据脱敏过滤规则` 属于 create 子 Skill；创建用户组添加成员时只能传用户 ID。邀请用户加入组织时，用户标识可传 username、email、姓名或 UUID，脚本会从全局组织解析用户 UUID。添加用户到用户组时，用户和用户组都只在目标组织解析。创建标签时 `name/value` 必填，`color/comment` 未传不发送。创建节点时只发送 `org_id/full_value/value`。创建主机/网络设备/数据库/Web 资产以完整 `--payload` JSON 为主，常用显式字段可覆盖；`--confirm` 时解析 `platform/nodes/labels/zone/accounts[].template`，未传协议按平台默认协议补齐，密文字段脱敏。创建网域只发送 `name/assets/comment`；创建网关机器以完整 `--payload` 为主。创建账号模板以完整 `--payload` JSON 为主，常用显式字段可覆盖，密文字段脱敏。给资产批量添加账号以完整 `--payload` JSON 为主，资产支持 ID、名称或地址，密文字段脱敏。给资产或节点批量添加账号模板以完整 `--payload` JSON 为主，账号模板支持 ID 或名称，资产支持 ID、名称或地址，节点支持 ID、名称或 full_value。创建命令组只发送 `type/ignore_case/name/content/comment`，且 `name/type/content` 必填。创建命令过滤规则以完整 `--payload` JSON 为主，常用显式字段 `--name`、`--priority`、`--action`、`--account`、`--command-group`、`--is-active` 可覆盖。创建用户登录控制以完整 `--payload` JSON 为主，常用显式字段 `--name`、`--priority`、`--action`、`--reviewer`、`--is-active`、`--comment` 可覆盖，`action` 为 `review` 或 `notice` 时需要 `reviewers`。创建连接方式过滤器以完整 `--payload` JSON 为主，常用显式字段 `--name`、`--action`、`--connect-method`、`--is-active`、`--comment` 可覆盖，`connect_methods` 不做硬编码枚举，`--confirm` 时查询连接方式选项接口并发送选项 `value` 字段，`label` 只作为显示名。创建资产授权规则以完整 `--payload` JSON 为主，`assets/nodes/users/user_groups` 会在 `--confirm` 时复用现有解析能力转成 UUID 或 `pk`，显式协议按 `label/value` 解析并发送 `value`，账号默认 `@ALL`，动作默认全部 value。创建资产连接规则和数据脱敏过滤规则以完整 `--payload` JSON 为主，`users.type=ids` / `assets.type=ids` 会在 `--confirm` 时复用现有用户/资产解析能力转成 ID。创建节点、主机/网络设备/数据库/Web 资产、网域、网关机器、账号模板、给资产批量添加账号、给资产或节点批量添加账号模板、命令组、命令过滤规则、资产授权规则、资产连接规则、数据脱敏过滤规则显式 `--org-id` / `--org-name` 复用组织解析且只限定本次命令，不写 `.env`，未传组织时使用 `.env JMS_ORG_ID`，全局组织禁止。创建用户登录控制和连接方式过滤器只能在全局组织下创建，显式组织或 `.env JMS_ORG_ID` 最终都必须是全局组织 ID `00000000-0000-0000-0000-000000000000`，且不写 `.env`。
 
 ## 使用报告与时间范围规则
 
@@ -191,29 +210,22 @@ python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-r
 
 ## 组织选择与阻塞规则
 
-- 用户显式指定组织时，按用户指定组织执行；`user-assets` / `user-nodes` / `user-asset-access` 优先使用命令级 `--org-id` / `--org-name` 临时限定组织，不写回 `.env`。
-- 报告或使用分析请求未指定组织，或用户明确说“所有组织”“全局组织”时，默认优先尝试全局组织 `00000000-0000-0000-0000-000000000000`。
-- 普通查询请求未指定组织时，会按现有组织规则处理；如果无法自动确定组织，会返回 `candidate_orgs`，并通过 `user_message` / `action_hint` 明确要求先选择查询组织。
-- 当前组织已生效但仍有其他可切换组织时，结果会继续回显 `switchable_orgs`，并通过 `org_context_hint` 明确说明当前查询范围固定在哪个组织。
+- 当前组织保存在 `.env` 的 `JMS_ORG_ID`；业务命令未显式传组织时使用这个当前组织。
+- 报告类 `daily-usage` 未显式传组织时，默认使用全局组织 `00000000-0000-0000-0000-000000000000`，且不写 `.env JMS_ORG_ID`。
+- 报告类 `daily-usage` 显式传 `--org-id` 或 `--org-name` 且匹配成功时，按该组织生成报告，并写入 `.env JMS_ORG_ID`。
+- 普通查询显式指定组织时，先解析成组织 ID，再按该组织执行；命令级 `--org-id` / `--org-name` 只限定本次命令，不写回 `.env`。
+- create 子 Skill 例外：创建用户/用户组传 `--org-name <name> --confirm` 时，唯一匹配后会写入 `.env JMS_ORG_ID`，再执行创建；未匹配或多匹配时返回 `candidate_orgs`。邀请用户加入组织、添加用户到用户组、创建标签、创建节点、创建主机/网络设备/数据库/Web 资产、创建网域、创建网关机器、创建账号模板、给资产批量添加账号、给资产或节点批量添加账号模板、创建命令组、创建命令过滤规则、创建资产授权规则、创建资产连接规则、创建数据脱敏过滤规则的目标组织只限定本次命令，不写 `.env`；创建标签、节点、主机/网络设备/数据库/Web 资产、网域、网关机器、账号模板、给资产批量添加账号、给资产或节点批量添加账号模板、命令组、命令过滤规则、资产授权规则、资产连接规则、数据脱敏过滤规则未传组织时使用 `.env JMS_ORG_ID`，且禁止全局组织。创建用户登录控制和连接方式过滤器只能在全局组织下创建；显式组织或 `.env JMS_ORG_ID` 最终都必须是全局组织 ID `00000000-0000-0000-0000-000000000000`，且不写 `.env`。创建组织不带 `X-JMS-ORG`，创建成功后不切换 `.env JMS_ORG_ID`。
+- 切换当前组织使用 `select-org --org-id <org-id> --confirm` 或 `select-org --org-name <org-name> --confirm`，确认后写入 `.env JMS_ORG_ID`。
+- 多组织且没有当前组织时，先返回 `candidate_orgs` 并阻塞，要求选择组织。
 - 如果当前组织是 A、目标对象在 B，不会自动跨组织继续执行。
 
 出现下面这些情况时，skill 会先阻塞，而不是继续猜测执行：
 
 - 配置或鉴权不完整
-- 组织不明确，且不能自动确定
 - 对象名称重名或平台不明确
 - 查询结果跨组织
-- 报告请求的全局组织不可访问
+- 多组织且没有当前组织可用
 - 用户试图绕过正式入口或跳过预检
-
-其中组织阻塞响应会额外返回这些结构化字段：
-
-- `reason_code=organization_selection_required`
-- `user_message`：明确提示“继续前必须先选择一个组织”
-- `action_hint`：给出安全下一步命令模板
-- `suggested_commands`：给出 1 到 3 条可直接复制的后续命令
-- `candidate_org_count`：当前候选组织数量
-- `org_selection_policy=required_before_query_when_multiple_accessible_orgs`
 
 ## 文档地图
 
@@ -221,21 +233,23 @@ python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-r
 |---|---|
 | [SKILL.md](./SKILL.md) | skill 的顶部路由规则、组织优先级与响应约束 |
 | [agents/openai.yaml](./agents/openai.yaml) | skill 接入描述与默认提示词入口 |
-| [references/routing-playbook.md](./references/routing-playbook.md) | 普通路由、典型触发词、阻塞规则与反例 |
-| [references/report-template-playbook.md](./references/report-template-playbook.md) | 模板化报告流程、组织优先级、时间范围与报告规则 |
-| [references/runtime.md](./references/runtime.md) | 预检流程、环境变量模型、组织选择与运行时约束 |
-| [references/capabilities.md](./references/capabilities.md) | capability 能力目录与能力说明 |
-| [references/assets.md](./references/assets.md) | 资产、账号、用户、节点、平台等对象查询说明 |
-| [references/permissions.md](./references/permissions.md) | 权限、ACL、RBAC 与授权关系查询说明 |
-| [references/audit.md](./references/audit.md) | 登录、会话、命令、文件传输等审计说明 |
-| [references/diagnose.md](./references/diagnose.md) | 连通性、对象解析、访问分析、系统巡检与治理说明 |
-| [references/safety-rules.md](./references/safety-rules.md) | 查询边界、本地写入例外与阻塞规则 |
-| [references/troubleshooting.md](./references/troubleshooting.md) | 常见错误排查与恢复建议 |
+| [references/routing-and-safety.md](./references/routing-and-safety.md) | 全仓库路由、正式入口边界、允许写操作白名单和全局阻塞规则 |
+| [subskills/query/references/routing-playbook.md](./subskills/query/references/routing-playbook.md) | 普通路由、典型触发词、阻塞规则与反例 |
+| [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | 模板化报告流程、组织优先级、时间范围与报告规则 |
+| [subskills/common/references/runtime.md](./subskills/common/references/runtime.md) | 预检流程、环境变量模型、组织选择与运行时约束 |
+| [subskills/query/references/capabilities.md](./subskills/query/references/capabilities.md) | capability 能力目录与能力说明 |
+| [subskills/query/references/assets.md](./subskills/query/references/assets.md) | 资产、账号、用户、节点、平台等对象查询说明 |
+| [subskills/create/references/index.md](./subskills/create/references/index.md) | create 子 skill 已支持命令与参考文档索引 |
+| [subskills/query/references/permissions.md](./subskills/query/references/permissions.md) | 权限、ACL、RBAC 与授权关系查询说明 |
+| [subskills/query/references/audit.md](./subskills/query/references/audit.md) | 登录、会话、命令、文件传输等审计说明 |
+| [subskills/query/references/diagnose.md](./subskills/query/references/diagnose.md) | 连通性、对象解析、访问分析、系统巡检与治理说明 |
+| [subskills/common/references/safety-rules.md](./subskills/common/references/safety-rules.md) | common 本地写入边界 |
+| [subskills/common/references/troubleshooting.md](./subskills/common/references/troubleshooting.md) | common 预检、组织和连通性排障 |
 
 ## 不支持范围
 
-- 资产、平台、节点、账号、用户、用户组、组织的创建、更新、删除、解锁。
-- 权限创建、更新、追加关系、移除关系、删除。
+- 除 `jms_create_user.py create-user`、`jms_create_user_group.py create-user-group`、`jms_create_org.py create-organization`、`jms_invite_user.py invite-user-to-org`、`jms_add_user_to_group.py add-user-to-user-group`、`jms_create_label.py create-label`、`jms_create_node.py create-node`、`jms_create_asset.py create-host-asset`、`jms_create_asset.py create-device-asset`、`jms_create_asset.py create-database-asset`、`jms_create_asset.py create-web-asset`、`jms_create_zone_gateway.py create-zone`、`jms_create_zone_gateway.py create-gateway`、`jms_create_account_template.py create-account-template`、`jms_asset_account_bulk.py add-account-to-assets`、`jms_asset_account_bulk.py add-account-template-to-assets`、`jms_create_command_acl.py create-command-group`、`jms_create_command_acl.py create-command-filter-rule`、`jms_create_login_acl.py create-login-acl`、`jms_create_connect_method_acl.py create-connect-method-acl`、`jms_create_asset_permission.py create-asset-permission`、`jms_create_login_asset_acl.py create-login-asset-acl` 和 `jms_create_data_masking_rule.py create-data-masking-rule` 外，资产、平台、账号、用户、用户组、组织、标签、节点、网域、网关机器、账号模板、命令组、命令过滤规则、用户登录控制、连接方式过滤器、资产授权规则、资产连接规则、数据脱敏过滤规则的创建、更新、删除、解锁。
+- 除命令过滤规则、用户登录控制、连接方式过滤器、资产授权规则、资产连接规则、数据脱敏过滤规则外，权限创建、更新、追加关系、移除关系、删除。
 - 跳过预检直接执行业务动作。
 - 临时 SDK/HTTP 脚本绕过正式入口。
 - 报告类请求绕过 `jms_report.py` 正式入口，改用现场临时拼装逻辑。

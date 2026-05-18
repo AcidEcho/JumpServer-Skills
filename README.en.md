@@ -2,7 +2,7 @@
 
 `jumpserver-skills` is a skill repository for JumpServer V4.10 that focuses on query workflows, audit investigation, and template-based usage reports. It is designed for object lookup, permission readback, audit investigation, governance inspection, access analysis, and bastion usage reports for a specific day or time range. It is closer to a reusable skill package with formal entrypoints than to a CLI tutorial that expects users to manually compose script commands.
 
-Inside the repository, requests are automatically routed to three formal entrypoints: `jms_query.py`, `jms_diagnose.py`, and `jms_report.py`. The repository stays read-only by default, only allowing local runtime writes to `.env` and the current organization context, and it does not perform JumpServer business write operations.
+Inside the repository, requests are automatically routed to the `subskills/*/scripts/jms_*.py` child-skill entrypoints. The repository stays read-only by default, only allowing local runtime writes to `.env` configuration, and it only supports the declared `create-user`, `create-user-group`, `create-organization`, `invite-user-to-org`, `add-user-to-user-group`, `create-label`, `create-node`, `create-host-asset`, `create-device-asset`, `create-database-asset`, `create-web-asset`, `create-zone`, `create-gateway`, `create-account-template`, `add-account-to-assets`, `add-account-template-to-assets`, `create-command-group`, `create-command-filter-rule`, `create-login-acl`, `create-connect-method-acl`, `create-asset-permission`, `create-login-asset-acl`, and `create-data-masking-rule` write operations.
 
 [中文](./README.md)
 
@@ -19,12 +19,30 @@ For first-time use, the natural-language `.env` generation path is usually the f
 | Capability Group | Suitable Requests | Entrypoint | Notes |
 |---|---|---|---|
 | Object queries | queries for assets, accounts, users, user groups, orgs, platforms, nodes, labels, and domains | `jms_query.py` | Best for exact object lists or reading a single object in detail |
-| Permission relationships | permission rules, ACL, RBAC, who can access an asset, details of a permission rule | `jms_query.py` | Read and explain only; no permission writes |
-| Audit investigation | login, session, command, file transfer, abnormal behavior, high-risk commands, failed login investigations | `jms_query.py` | Best for logs, records, details, and event-level requests |
-| Configuration and diagnostics | config checks, connectivity, org switching, object resolution, license, system settings, storage, tickets | `jms_diagnose.py` | Best for preflight, environment confirmation, and governance prerequisites |
-| User effective access scope | which assets or nodes a user can access, or which accounts/protocols a user can use on an asset | `jms_diagnose.py` | Returns effective access scope first instead of defaulting to permission-rule explanations |
-| Governance inspection | asset governance, account governance, access analysis, system inspection, capability-based aggregate analysis | `jms_diagnose.py` | Prefer capability aggregation instead of forcing users to stitch together scattered queries |
+| Permission relationships | permission rules, ACL, RBAC, who can access an asset, details of a permission rule | `jms_permissions.py` | Read and explain only; no permission writes |
+| Audit investigation | login, session, command, file transfer, abnormal behavior, high-risk commands, failed login investigations | `jms_audit.py` | Best for logs, records, details, and event-level requests |
+| Shared preflight | config checks, connectivity, org switching, endpoint verification | `jms_common.py` | Best before any business query or write operation |
+| Read-only runtime queries | object resolution, platform resolution, license, system settings, storage, tickets, raw reports | `jms_query.py` / `jms_runtime_query.py` | Query-only capabilities under the query subskill |
+| User effective access scope | which assets or nodes a user can access, or which accounts/protocols a user can use on an asset | `jms_access.py` | Returns effective access scope first instead of defaulting to permission-rule explanations |
+| Governance inspection | asset governance, account governance, access analysis, system inspection, capability-based aggregate analysis | `jms_inspect.py` | Prefer capability aggregation instead of forcing users to stitch together scattered queries |
 | Usage reports | daily reports, usage situation, usage analysis, what happened on a day, rankings or overviews for a time range | `jms_report.py` | These requests produce a complete HTML report instead of a one-line summary |
+| Create user | create JumpServer local users | `jms_create_user.py` | Dry-run without `--confirm`; create only with `--confirm`, duplicate check, and masked password output |
+| Create user group | create JumpServer user groups, optionally with multiple user IDs | `jms_create_user_group.py` | Dry-run without `--confirm`; create only with `--confirm`; add members with multiple `--user <user-id>` arguments |
+| Create organization | create JumpServer organizations | `jms_create_org.py` | Dry-run without `--confirm`; create only with `--confirm`; request sends no `X-JMS-ORG` |
+| Invite user to organization | invite globally visible users into a target organization | `jms_invite_user.py` | Dry-run without `--confirm`; create only with `--confirm`; users are resolved from the global organization |
+| Add user to user group | add target-organization users into target-organization user groups | `jms_add_user_to_group.py` | Dry-run without `--confirm`; create only with `--confirm`; users and groups are resolved inside the target organization |
+| Create label | create JumpServer labels | `jms_create_label.py` | Dry-run without `--confirm`; create only with `--confirm` after duplicate check in the target organization; Global organization is blocked |
+| Create node | create JumpServer asset nodes | `jms_create_node.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/assets/nodes/`; explicit organization is command-scoped and does not write `.env`; Global organization is blocked |
+| Create host/device/database/web asset | create JumpServer assets | `jms_create_asset.py` | Dry-run without `--confirm`; create only with `--confirm` after resolving `platform/nodes/labels/zone/accounts[].template`; default protocols come from the platform; secret fields are masked; Global organization is blocked |
+| Create zone/gateway | create JumpServer zones and gateway machines | `jms_create_zone_gateway.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/assets/zones/` or `/api/v1/assets/gateways/`; gateways resolve `platform/zone/nodes/labels`; Global organization is blocked |
+| Create account template | create JumpServer account templates | `jms_create_account_template.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/accounts/account-templates/`; `su_from/platforms` are resolved on confirm; explicit organization is command-scoped and does not write `.env`; `.env JMS_ORG_ID` is used when no organization is passed; Global organization is blocked; secret fields are masked |
+| Add account/template to assets | add accounts to one or more assets, or add account templates to assets/nodes | `jms_asset_account_bulk.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/accounts/accounts/bulk/`; explicit organization is command-scoped and does not write `.env`; `.env JMS_ORG_ID` is used when no organization is passed; Global organization is blocked; secret fields are masked |
+| Create command group/filter rule | create JumpServer command groups and command filter rules | `jms_create_command_acl.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/acls/command-groups/` or `/api/v1/acls/command-filter-acls/`; Global organization is blocked |
+| Create login ACL | create JumpServer login ACLs | `jms_create_login_acl.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/acls/login-acls/`; only Global organization is allowed; does not write `.env` |
+| Create connect method filter | create JumpServer connect method filters | `jms_create_connect_method_acl.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/acls/connect-method-acls/`; only Global organization is allowed; does not write `.env` |
+| Create asset permission | create JumpServer asset permission rules | `jms_create_asset_permission.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/perms/asset-permissions/`; Global organization is blocked |
+| Create login asset ACL | create JumpServer login asset ACLs | `jms_create_login_asset_acl.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/acls/login-asset-acls/`; Global organization is blocked |
+| Create data masking rule | create JumpServer data masking rules | `jms_create_data_masking_rule.py` | Dry-run without `--confirm`; create only with `--confirm` by POSTing `/api/v1/acls/data-masking-rules/`; `accounts` only supports `@ALL/@SPEC`; Global organization is blocked |
 
 ## How To Use This Skill
 
@@ -62,19 +80,19 @@ If you want to run the formal entrypoints manually, use parameters in this order
 Recommended style:
 
 ```bash
-python3 scripts/jumpserver_api/jms_diagnose.py select-org --org-name Default
-python3 scripts/jumpserver_api/jms_diagnose.py user-assets --org-name Default --username example.user
-python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --name Default
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --days 7 --user example.user
-python3 scripts/jumpserver_api/jms_diagnose.py inspect --capability hot-assets-ranking --days 30 --top 10
-python3 scripts/jumpserver_api/jms_diagnose.py reports --report-type account-statistic --days 30
+python3 subskills/common/scripts/jms_common.py select-org --org-name Default
+python3 subskills/query/scripts/jms_access.py user-assets --org-name Default --username example.user
+python3 subskills/query/scripts/jms_query.py object-list --resource organization --name Default
+python3 subskills/query/scripts/jms_audit.py audit-analyze --capability session-record-query --days 7 --user example.user
+python3 subskills/query/scripts/jms_inspect.py inspect --capability hot-assets-ranking --days 30 --top 10
+python3 subskills/query/scripts/jms_runtime_query.py reports --report-type account-statistic --days 30
 ```
 
 Compatibility style:
 
 ```bash
-python3 scripts/jumpserver_api/jms_query.py object-list --resource organization --filters '{"name":"Default"}'
-python3 scripts/jumpserver_api/jms_query.py audit-analyze --capability session-record-query --filter user=example.user --filter days=7
+python3 subskills/query/scripts/jms_query.py object-list --resource organization --filters '{"name":"Default"}'
+python3 subskills/query/scripts/jms_audit.py audit-analyze --capability session-record-query --filter user=example.user --filter days=7
 ```
 
 List and analysis commands now auto-paginate and return the full result set for the requested range, so `--limit/--offset` are no longer supported.
@@ -89,7 +107,7 @@ If you want to provide everything up front, these are usually enough:
 
 - `JMS_API_URL`
 - one complete credential pair: `JMS_ACCESS_KEY_ID/JMS_ACCESS_KEY_SECRET` or `JMS_USERNAME/JMS_PASSWORD`
-- `JMS_ORG_ID`, which can be left empty if you are not sure yet
+- `JMS_ORG_ID`, which can be left empty at first and later written by `select-org --confirm`
 - `JMS_TIMEOUT`, which falls back to the default if omitted
 - `JMS_VERIFY_TLS`, which defaults to `false` if omitted
 
@@ -100,7 +118,7 @@ If you want to provide everything up front, these are usually enough:
 | `JMS_ACCESS_KEY_SECRET` | paired with `JMS_ACCESS_KEY_ID`, or use username/password instead | API Access Key Secret |
 | `JMS_USERNAME` | paired with `JMS_PASSWORD`, or use AK/SK instead | JumpServer login username |
 | `JMS_PASSWORD` | paired with `JMS_USERNAME`, or use AK/SK instead | JumpServer login password |
-| `JMS_ORG_ID` | optional during initialization | written before business execution through org selection or reserved-org rules |
+| `JMS_ORG_ID` | optional | current organization ID, writable by `select-org --confirm` |
 | `JMS_TIMEOUT` | optional | request timeout in seconds |
 | `JMS_VERIFY_TLS` | optional | whether to verify certificates, default `false` |
 
@@ -137,6 +155,7 @@ These boundaries are especially important:
 - Expressions like `why can this user access this asset` or `details of this permission rule` belong to permission explanation or access analysis.
 - Expressions like `login status for a day`, `session overview for a day`, or `who had the most activity in a time range` belong to reports or usage analysis.
 - Expressions like `login logs for a day`, `command records for a day`, or `details of a specific session` belong to audit investigation.
+- Creating users, user groups, organizations, organization invitations, user-group membership relations, labels, nodes, host/device/database/web assets, zones, gateway machines, account templates, asset-account bulk bindings, command groups, command filter rules, login ACLs, connect method filters, asset permissions, login asset ACLs, and data masking rules belongs to the create subskill. User-group members must be user IDs; resolve names, usernames, or emails first with `jms_query.py resolve --resource user --name <value>`. For labels, `name/value` are required, and `color/comment` are omitted when not supplied. For nodes, only `org_id/full_value/value` is sent. Host/device/database/web assets primarily use full `--payload` JSON with common explicit overrides; on `--confirm`, they resolve `platform/nodes/labels/zone/accounts[].template`, fill default protocols from the platform when omitted, and mask secret fields. For zones, only `name/assets/comment` is sent. Gateway machines primarily use full `--payload` JSON. Account templates primarily use full `--payload` JSON, support common explicit overrides, and mask secret fields. Asset-account bulk bindings primarily use full `--payload` JSON; assets, nodes, and account templates must be IDs, and account secrets are masked. Command groups send only `type/ignore_case/name/content/comment`, and `name/type/content` are required. Command filter rules primarily use full `--payload` JSON, with `--name`, `--priority`, `--action`, `--account`, `--command-group`, and `--is-active` as common explicit overrides. Login ACLs primarily use full `--payload` JSON, with `--name`, `--priority`, `--action`, and `--is-active` as common explicit overrides; `review` and `notice` actions require `reviewers`. Connect method filters primarily use full `--payload` JSON, with `--name`, `--action`, `--connect-method`, `--is-active`, and `--comment` as common explicit overrides. Asset permissions primarily use full `--payload` JSON; `assets/nodes/users/user_groups` are resolved on `--confirm`, explicit protocols are matched by `label/value` and sent as `value`, accounts default to `@ALL`, and actions default to all action values. Login asset ACLs and data masking rules primarily use full `--payload` JSON; `users.type=ids` and `assets.type=ids` are resolved to IDs on `--confirm` by reusing existing user/asset resolution. Explicit `--org-id` / `--org-name` for nodes, host/device/database/web assets, zones, gateways, account templates, asset-account bulk bindings, command groups, command filter rules, asset permissions, login asset ACLs, and data masking rules reuses organization resolution and does not write `.env`; when no organization is passed, `.env JMS_ORG_ID` is used; Global organization is blocked. Login ACLs and connect method filters can only be created in the Global organization; explicit organization or `.env JMS_ORG_ID` must ultimately be the Global organization ID `00000000-0000-0000-0000-000000000000`, and `.env` is not written.
 
 ## Usage Reports and Time-Range Rules
 
@@ -168,29 +187,22 @@ Reports are always written to `reports/JumpServer-YYYY-MM-DD.html`. If the reque
 
 ## Organization Selection and Blocking Rules
 
-- When the user explicitly specifies an organization, execute in that organization.
-- For report or usage-analysis requests with no specified organization, or when the user explicitly says "all organizations" or "global organization", default to trying the global organization `00000000-0000-0000-0000-000000000000` first.
-- For ordinary query requests with no specified organization, the existing organization rules apply. If the organization cannot be determined safely, the result returns `candidate_orgs` and uses `user_message` / `action_hint` to explicitly require an organization choice before continuing.
-- If the current organization is already active but other organizations can still be switched to, the result continues to return `switchable_orgs`, and `org_context_hint` makes it clear which organization currently defines the query scope.
+- The current organization is stored in `.env` as `JMS_ORG_ID`; business commands use it when no organization is passed explicitly.
+- `daily-usage` reports default to the Global organization `00000000-0000-0000-0000-000000000000` when no organization is passed, and do not write `.env JMS_ORG_ID`.
+- When `daily-usage` receives `--org-id` or a uniquely matched `--org-name`, it uses that organization for the report and writes `.env JMS_ORG_ID`.
+- For ordinary queries, explicitly specified organizations are resolved to an organization ID and only affect the current command.
+- Create subskill exception: when creating a user or user group with `--org-name <name> --confirm`, a unique match writes `.env JMS_ORG_ID` before creation; no match or multiple matches returns `candidate_orgs`. Organization invitations, user-group membership additions, label creation, node creation, host/device/database/web asset creation, zone creation, gateway creation, account template creation, asset-account bulk bindings, command group creation, command filter rule creation, asset permission creation, login asset ACL creation, and data masking rule creation use the explicit organization only for the current command and do not write `.env`; label, node, host/device/database/web asset, zone, gateway, account template, asset-account bulk binding, command group, command filter rule, asset permission, login asset ACL, and data masking rule creation use `.env JMS_ORG_ID` when no organization is passed and block the Global organization. Login ACLs and connect method filters can only be created in the Global organization; explicit organization or `.env JMS_ORG_ID` must ultimately be the Global organization ID `00000000-0000-0000-0000-000000000000`, and `.env` is not written. Creating an organization sends no `X-JMS-ORG` and does not switch `.env JMS_ORG_ID` after success.
+- Use `select-org --org-id <org-id> --confirm` or `select-org --org-name <org-name> --confirm` to switch the current organization and write `.env JMS_ORG_ID`.
+- If multiple organizations are accessible and no current organization is selected, the skill returns `candidate_orgs` and blocks until one is selected.
 - If the current organization is A and the target object is in B, the workflow does not continue automatically across organizations.
 
 In the following cases, the skill blocks instead of continuing by guesswork:
 
 - configuration or authentication is incomplete
-- the organization is unclear and cannot be determined automatically
 - the object name is duplicated or the platform is unclear
 - query results cross organizations
-- the global organization required by the report request is not accessible
+- no current organization is selected while multiple organizations are accessible
 - the user tries to bypass the formal entrypoint or skip preflight
-
-Organization-blocking responses also include these structured fields:
-
-- `reason_code=organization_selection_required`
-- `user_message`, which explicitly says an organization must be chosen before continuing
-- `action_hint`, which provides the safe next command template
-- `suggested_commands`, which provides 1-3 copyable follow-up commands
-- `candidate_org_count`, which shows how many accessible organization candidates are available
-- `org_selection_policy=required_before_query_when_multiple_accessible_orgs`
 
 ## Document Map
 
@@ -198,21 +210,23 @@ Organization-blocking responses also include these structured fields:
 |---|---|
 | [SKILL.md](./SKILL.md) | top-level routing rules, organization priority, and response constraints |
 | [agents/openai.yaml](./agents/openai.yaml) | skill integration description and default prompt entry |
-| [references/routing-playbook.md](./references/routing-playbook.md) | ordinary routing, typical trigger words, blocking rules, and counterexamples |
-| [references/report-template-playbook.md](./references/report-template-playbook.md) | template report workflow, organization priority, time-range handling, and report rules |
-| [references/runtime.md](./references/runtime.md) | preflight flow, environment variable model, organization selection, and runtime constraints |
-| [references/capabilities.md](./references/capabilities.md) | capability catalog and capability descriptions |
-| [references/assets.md](./references/assets.md) | query guidance for assets, accounts, users, nodes, platforms, and related objects |
-| [references/permissions.md](./references/permissions.md) | query guidance for permissions, ACL, RBAC, and authorization relationships |
-| [references/audit.md](./references/audit.md) | audit guidance for login, session, command, file-transfer, and related data |
-| [references/diagnose.md](./references/diagnose.md) | connectivity, object resolution, access analysis, system inspection, and governance guidance |
-| [references/safety-rules.md](./references/safety-rules.md) | query boundaries, local write exceptions, and blocking rules |
-| [references/troubleshooting.md](./references/troubleshooting.md) | common troubleshooting and recovery suggestions |
+| [references/routing-and-safety.md](./references/routing-and-safety.md) | repository-wide routing, formal entrypoint boundaries, allowed write operations, and global blocking rules |
+| [subskills/query/references/routing-playbook.md](./subskills/query/references/routing-playbook.md) | ordinary routing, typical trigger words, blocking rules, and counterexamples |
+| [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | template report workflow, organization priority, time-range handling, and report rules |
+| [subskills/common/references/runtime.md](./subskills/common/references/runtime.md) | preflight flow, environment variable model, organization selection, and runtime constraints |
+| [subskills/query/references/capabilities.md](./subskills/query/references/capabilities.md) | capability catalog and capability descriptions |
+| [subskills/query/references/assets.md](./subskills/query/references/assets.md) | query guidance for assets, accounts, users, nodes, platforms, and related objects |
+| [subskills/create/references/index.md](./subskills/create/references/index.md) | supported create commands and reference index for the create subskill |
+| [subskills/query/references/permissions.md](./subskills/query/references/permissions.md) | query guidance for permissions, ACL, RBAC, and authorization relationships |
+| [subskills/query/references/audit.md](./subskills/query/references/audit.md) | audit guidance for login, session, command, file-transfer, and related data |
+| [subskills/query/references/diagnose.md](./subskills/query/references/diagnose.md) | connectivity, object resolution, access analysis, system inspection, and governance guidance |
+| [subskills/common/references/safety-rules.md](./subskills/common/references/safety-rules.md) | common local-write boundaries |
+| [subskills/common/references/troubleshooting.md](./subskills/common/references/troubleshooting.md) | common preflight, organization, and connectivity troubleshooting |
 
 ## Unsupported Scope
 
-- Creating, updating, deleting, or unlocking assets, platforms, nodes, accounts, users, user groups, or organizations.
-- Creating, updating, appending, removing, or deleting permissions and their relationships.
+- Creating, updating, deleting, or unlocking assets, platforms, accounts, account templates, users, user groups, organizations, labels, nodes, zones, gateways, command groups, command filter rules, login ACLs, connect method filters, asset permission rules, login asset ACLs, or data masking rules, except `jms_create_user.py create-user`, `jms_create_user_group.py create-user-group`, `jms_create_org.py create-organization`, `jms_invite_user.py invite-user-to-org`, `jms_add_user_to_group.py add-user-to-user-group`, `jms_create_label.py create-label`, `jms_create_node.py create-node`, `jms_create_asset.py create-host-asset`, `jms_create_asset.py create-device-asset`, `jms_create_asset.py create-database-asset`, `jms_create_asset.py create-web-asset`, `jms_create_zone_gateway.py create-zone`, `jms_create_zone_gateway.py create-gateway`, `jms_create_account_template.py create-account-template`, `jms_asset_account_bulk.py add-account-to-assets`, `jms_asset_account_bulk.py add-account-template-to-assets`, `jms_create_command_acl.py create-command-group`, `jms_create_command_acl.py create-command-filter-rule`, `jms_create_login_acl.py create-login-acl`, `jms_create_connect_method_acl.py create-connect-method-acl`, `jms_create_asset_permission.py create-asset-permission`, `jms_create_login_asset_acl.py create-login-asset-acl`, and `jms_create_data_masking_rule.py create-data-masking-rule`.
+- Creating, updating, appending, removing, or deleting permissions and their relationships, except command filter rule, login ACL, connect method filter, asset permission rule, login asset ACL, and data masking rule creation.
 - Running business actions while skipping preflight.
 - Using temporary SDK or HTTP scripts to bypass the formal entrypoints.
 - Bypassing the formal `jms_report.py` entrypoint for report requests and replacing it with ad hoc inline logic.
