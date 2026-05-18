@@ -1,35 +1,48 @@
 ---
 name: jumpserver-common
-description: JumpServer shared runtime helper skill for configuration check, preflight, connectivity, organization selection, and endpoint verification. Use before any query/create/update skill when runtime state is unknown.
+description: JumpServer shared runtime helper skill for config checks, preflight, connectivity, organization selection, and endpoint verification. Use before query/create/update when runtime state is unknown.
 ---
 
 # Common
 
-公共入口：
+common 子 Skill 只负责配置、预检、组织选择、连通性和端点验证；不处理业务查询或业务写入。
 
-```bash
-python3 subskills/common/scripts/jms_common.py <command> ...
-```
+## 输入 / 输出
 
-支持：
+| 项 | 内容 |
+|---|---|
+| 输入 | JumpServer 地址、认证信息、组织选择、端点路径、连通性检查需求 |
+| 输出 | 配置状态、当前组织、候选组织、连通性结果、端点验证结果 |
 
-- `config-status`
-- `config-write`
-- `ping`
-- `select-org`
-- `endpoint-inventory`
-- `endpoint-verify`
+## 何时先走 Common
 
-规则：
+| 条件 | 动作 |
+|---|---|
+| 配置不完整或不确定 | `config-status --json` |
+| 需要写入本地运行时配置 | `config-write --confirm` |
+| 需要验证 JumpServer 可访问 | `ping` |
+| 组织不明确或需要切换 | `select-org`，确认后加 `--confirm` |
+| 不确定接口是否存在 | `endpoint-verify` 或 `endpoint-inventory` |
 
-- 所有业务 skill 执行前，如配置、组织、连通性不确定，先走这里。
-- `select-org` 不带 `--confirm` 只预览；带 `--confirm` 写入 `.env JMS_ORG_ID`。
-- 这里不放对象、访问、权限、审计、报表、巡检等业务查询；这些都在 `subskills/query/`。
-- 写 `.env` 只允许 `config-write --confirm` 和 `select-org --confirm`。
-- 切组织只允许 `select-org --confirm`。
-- 多组织且无法自动确定时，返回 `candidate_orgs` 后阻塞。
+## 命令速查
 
-示例：
+| 命令 | 作用 | 写入 |
+|---|---|---|
+| `config-status` | 查看配置和非密摘要 | 否 |
+| `config-write` | 写 `.env` 配置 | 仅 `--confirm` |
+| `ping` | 验证认证和连通性 | 否 |
+| `select-org` | 选择当前组织 | 仅 `--confirm` |
+| `endpoint-inventory` | 查看端点清单 | 否 |
+| `endpoint-verify` | 验证端点方法 | 否 |
+
+## 写入边界
+
+| 允许 | 禁止 |
+|---|---|
+| `config-write --confirm` 写本地 `.env` | 写 JumpServer 业务对象 |
+| `select-org --confirm` 写 `.env JMS_ORG_ID` | 创建、更新、删除业务数据 |
+
+## 示例
 
 ```bash
 python3 subskills/common/scripts/jms_common.py config-status --json
@@ -37,3 +50,9 @@ python3 subskills/common/scripts/jms_common.py ping
 python3 subskills/common/scripts/jms_common.py select-org --org-name Default
 python3 subskills/common/scripts/jms_common.py endpoint-verify --path /api/v1/settings/setting/ --method GET
 ```
+
+## 成功标准
+
+- 已返回 `reason_code`、`user_message`、`action_hint` 或明确结果。
+- 多组织且无法自动确定时，返回 `candidate_orgs` 后阻塞。
+- 写 `.env` 前必须看到 `--confirm`。

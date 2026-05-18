@@ -13,3 +13,5 @@ __pycache__/
 
 tests/
 reports/
+
+API.md
