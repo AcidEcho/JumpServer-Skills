@@ -41,8 +41,12 @@ cp .env.example .env
 
 如果本地配置不完整，运行时也可以直接通过自然语言对话帮你生成 `.env`。它会按固定顺序收集 `JMS_API_URL`、认证方式、组织、超时和 TLS 配置，回显脱敏摘要后写入本地 `.env`。例如：
 
-- “帮我生成 `.env`，JumpServer 地址是 `https://jump.example.com`，我用 AK/SK 登录。”
-- “帮我初始化 JumpServer 配置，我用用户名密码登录，不校验证书。”
+```bash
+“帮我生成 `.env`，JumpServer 地址是 `https://jump.example.com`，我用 AK/SK 登录。
+```
+```bash
+帮我初始化 JumpServer 配置，我用用户名密码登录，不校验证书。
+```
 
 2. 把这个 skill 接到你的 agent 或 Codex 环境里使用。仓库中的 [agents/openai.yaml](./agents/openai.yaml) 提供了一个现成的 skill 接入描述，可作为引用或注册该 skill 的入口之一。
 

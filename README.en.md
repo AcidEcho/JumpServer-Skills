@@ -41,8 +41,12 @@ Conversation method:
 
 If the local configuration is incomplete, the runtime can generate `.env` through natural-language conversation. It collects `JMS_API_URL`, authentication mode, organization, timeout, and TLS settings in a fixed order, echoes a redacted summary, and writes the local `.env`. For example:
 
-- "Help me generate `.env`. The JumpServer URL is `https://jump.example.com`, and I log in with AK/SK."
-- "Help me initialize JumpServer config. I log in with username and password, and I do not verify certificates."
+```text
+Help me generate `.env`. The JumpServer URL is `https://jump.example.com`, and I log in with AK/SK.
+```
+```text
+Help me initialize JumpServer config. I log in with username and password, and I do not verify certificates.
+```
 
 2. Connect this skill to your agent or Codex environment. [agents/openai.yaml](./agents/openai.yaml) provides a ready-to-use skill integration description that can be used as a reference or registration entrypoint.
 
