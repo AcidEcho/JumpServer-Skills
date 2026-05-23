@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, usage reports, and controlled object creation. Users do not need to manually compose script commands: the repository automatically routes requests to query, diagnosis, report, or create entrypoints based on request type. For safety, local writes are limited to `.env`; server-side writes are limited to the allowlisted create entrypoints in [`references/routing-and-safety.md`](./references/routing-and-safety.md), with command mappings documented in [`subskills/create/references/index.md`](./subskills/create/references/index.md). Create output redacts secret fields. Apart from these explicitly opened create capabilities, all other capabilities remain non-destructive reads.
+`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, template-based usage reports, and controlled object creation. Users do not need to manually compose script commands; apart from allowlisted create entrypoints, server-side capabilities remain non-destructive reads, and create output automatically redacts secret fields.
 
 [中文](./README.md)
 

@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` 是面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令，仓库会按请求类型自动路由到查询、诊断、报告或创建入口；安全策略上，本地仅允许写入 `.env`，服务端写操作仅限 [`references/routing-and-safety.md`](./references/routing-and-safety.md) 白名单中的 create 入口，命令映射见 [`subskills/create/references/index.md`](./subskills/create/references/index.md)，create 输出会脱敏密文字段。除这些明确开放的创建能力外，其余能力保持非破坏性读取。
+`jumpserver-skills` 是一个面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、模板化使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令；除白名单 create 入口外，其余服务端能力保持非破坏性读取，create 输出会自动脱敏密文字段。
 
 [English](./README.en.md)
 
