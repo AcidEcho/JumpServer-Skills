@@ -14,6 +14,11 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 
 ensure_requirements_installed()
 
+from jumpserver_common.jms_text_utils import (
+    exact_first_filter as _exact_first_filter,
+    lower_text as _lower,
+    value_from_path as _value_from_path,
+)
 from jumpserver_common.jms_runtime import (
     CLIError,
     CLIHelpFormatter,
@@ -88,35 +93,6 @@ RESOLVE_EXAMPLES = [
     "python3 subskills/query/scripts/jms_query.py resolve --resource organization --name Default",
     "python3 subskills/query/scripts/jms_query.py resolve --resource user --name example.user",
 ]
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _value_from_path(item: dict[str, Any], path: str) -> Any:
-    current: Any = item
-    for part in path.split("."):
-        if not isinstance(current, dict):
-            return None
-        current = current.get(part)
-    return current
-
-
-def _exact_first_filter(items: list[dict[str, Any]], expected: Any, *paths: str) -> list[dict[str, Any]]:
-    wanted = _lower(expected)
-    if not wanted:
-        return items
-    exact_matches = []
-    partial_matches = []
-    for item in items:
-        values = [_value_from_path(item, path) for path in paths]
-        text_values = [_lower(value) for value in values if value not in {None, ""}]
-        if wanted in text_values:
-            exact_matches.append(item)
-        elif any(wanted in value for value in text_values):
-            partial_matches.append(item)
-    return exact_matches or partial_matches
 
 
 def _asset_list_path(kind: str | None) -> str:

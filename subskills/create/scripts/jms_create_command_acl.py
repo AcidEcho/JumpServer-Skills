@@ -22,7 +22,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     build_cli_guidance_payload,
     create_client,
     create_discovery,
-    current_runtime_values,
+    create_env_org_context,
     has_cli_value,
     is_uuid_like,
     merge_filter_args,
@@ -30,6 +30,8 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     org_id_from_context,
     parse_bool,
     parse_json_arg,
+    preview_create_org_context,
+    raise_create_global_org_error,
     resolve_command_org_context,
     run_and_print,
 )
@@ -335,79 +337,31 @@ def _resolve_command_filter_rule_references(payload: dict[str, Any], *, org_id: 
     return resolved_payload, resolved_refs
 
 
+_GLOBAL_USER_MESSAGE = "创建命令组/命令过滤规则时，目标组织不能使用全局组织 ID。"
+
+
 def _raise_global_target_org_error(org_id: str) -> None:
-    raise CLIError(
-        "目标组织不能是全局组织。",
-        payload=build_cli_guidance_payload(
-            "organization_not_accessible",
-            user_message="创建命令组/命令过滤规则时，目标组织不能使用全局组织 ID。",
-            action_hint="请改用具体目标组织 ID 或 `--org-name <target-org>`。",
-            org_id=org_id,
-        ),
+    raise_create_global_org_error(
+        org_id,
+        resource_name="命令组/命令过滤规则创建",
+        user_message=_GLOBAL_USER_MESSAGE,
     )
 
 
 def _env_org_context(resource_name: str) -> dict[str, Any]:
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if not org_id:
-        raise CLIError(
-            "未选择目标组织。",
-            payload=build_cli_guidance_payload(
-                "organization_selection_required",
-                user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定%s创建组织。" % resource_name,
-                action_hint="请传入 `--org-id <org-id>` 或 `--org-name <name>`，或先用 common 子 skill 选择当前组织。",
-            ),
-        )
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    return {
-        "effective_org": {"id": org_id, "name": "Unknown", "source": "env"},
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "当前命令范围使用 .env JMS_ORG_ID=%s；不写入 .env。" % org_id,
-    }
+    return create_env_org_context(
+        resource_name=resource_name,
+        missing_user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定%s创建组织。" % resource_name,
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _preview_org_context(args: argparse.Namespace) -> dict[str, Any]:
-    requested_org_id = _text(getattr(args, "org_id", None))
-    requested_org_name = _text(getattr(args, "org_name", None))
-    if requested_org_id and requested_org_name:
-        raise CLIError(
-            "组织参数冲突。",
-            payload=build_cli_guidance_payload(
-                "ambiguous_organization_selector",
-                user_message="命令只能传 `--org-id` 或 `--org-name` 其中一个。",
-                action_hint="请保留一个组织定位参数后重试。",
-                provided=["org_id", "org_name"],
-            ),
-        )
-    if requested_org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(requested_org_id)
-    if requested_org_id:
-        return {
-            "effective_org": {"id": requested_org_id, "name": "Unknown", "source": "command_explicit_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织 ID %s；追加 --confirm 后才解析组织并创建。" % requested_org_id,
-        }
-    if requested_org_name:
-        return {
-            "effective_org": {"id": "", "name": requested_org_name, "source": "command_org_name_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织名称 %s；追加 --confirm 后才查询组织并创建。" % requested_org_name,
-        }
-
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    effective_org = {"id": org_id, "name": "Unknown", "source": "env_preview"} if org_id else None
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览 payload；正式创建时未传组织将使用 .env JMS_ORG_ID。",
-    }
+    return preview_create_org_context(
+        args,
+        resource_name="创建命令组/命令过滤规则",
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _resolve_org_context(args: argparse.Namespace, resource_name: str) -> dict[str, Any]:
@@ -679,14 +633,6 @@ def _command_filter_rule_payload_summary(payload: dict[str, Any]) -> dict[str, A
     }
 
 
-def _existing_by_name(client, path: str, *, name: str, brief_func) -> list[dict[str, Any]]:
-    records = client.list_paginated(path, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-    wanted_name = _text(name)
-    return [brief_func(item) for item in records if isinstance(item, dict) and _text(item.get("name")) == wanted_name]
-
-
 def _create_command_group(args: argparse.Namespace):
     payload = _build_command_group_payload(args)
     _validate_command_group_payload(payload)
@@ -703,23 +649,6 @@ def _create_command_group(args: argparse.Namespace):
 
     org_context = _resolve_org_context(args, "命令组")
     client = create_client(org_id=org_id_from_context(org_context))
-    duplicates = _existing_by_name(
-        client,
-        CREATE_COMMAND_GROUP_PATH,
-        name=str(payload.get("name") or ""),
-        brief_func=_brief_command_group,
-    )
-    if duplicates:
-        raise CLIError(
-            "命令组已存在。",
-            payload=build_cli_guidance_payload(
-                "command_group_already_exists",
-                user_message="目标组织内已存在同名命令组，已阻止创建。",
-                action_hint="请改用已有命令组，或换一个名称。",
-                duplicate_command_groups=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_COMMAND_GROUP_PATH, json_body=payload)
     return {
         "dry_run": False,
@@ -748,23 +677,6 @@ def _create_command_filter_rule(args: argparse.Namespace):
     org_id = org_id_from_context(org_context)
     client = create_client(org_id=org_id)
     payload, resolved_references = _resolve_command_filter_rule_references(payload, org_id=org_id)
-    duplicates = _existing_by_name(
-        client,
-        CREATE_COMMAND_FILTER_RULE_PATH,
-        name=str(payload.get("name") or ""),
-        brief_func=_brief_command_filter_rule,
-    )
-    if duplicates:
-        raise CLIError(
-            "命令过滤规则已存在。",
-            payload=build_cli_guidance_payload(
-                "command_filter_rule_already_exists",
-                user_message="目标组织内已存在同名命令过滤规则，已阻止创建。",
-                action_hint="请改用已有命令过滤规则，或换一个名称。",
-                duplicate_command_filter_rules=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_COMMAND_FILTER_RULE_PATH, json_body=payload)
     return {
         "dry_run": False,

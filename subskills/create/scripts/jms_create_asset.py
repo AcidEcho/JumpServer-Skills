@@ -538,8 +538,6 @@ def _validate_asset_payload(payload: dict[str, Any], *, asset_type: str, require
         missing.append("platform.pk")
     if not isinstance(payload.get("nodes"), list) or not payload.get("nodes"):
         missing.append("nodes")
-    if not has_cli_value(payload.get("zone")):
-        missing.append("zone")
     if missing:
         _raise_validation_error(
             "missing_create_asset_fields",
@@ -1004,33 +1002,6 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_assets(client, *, path: str, name: str, address: str) -> list[dict[str, Any]]:
-    records = []
-    seen_searches = set()
-    for search in (name, address):
-        search = _text(search)
-        if not search or search in seen_searches:
-            continue
-        seen_searches.add(search)
-        result = client.list_paginated(path, params={"search": search})
-        if isinstance(result, list):
-            records.extend(result)
-    wanted_name = _text(name)
-    wanted_address = _text(address)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        if _text(item.get("name")) == wanted_name or _text(item.get("address")) == wanted_address:
-            signature = str(item.get("id") or item.get("pk") or "%s:%s" % (item.get("name"), item.get("address")))
-            if signature in seen:
-                continue
-            seen.add(signature)
-            matches.append(_brief_asset(item))
-    return matches
-
-
 def _create_asset(args: argparse.Namespace, *, asset_type: str) -> dict[str, Any]:
     payload = _build_asset_payload(args, asset_type=asset_type)
     _validate_asset_payload(payload, asset_type=asset_type, require_protocols=False)
@@ -1066,23 +1037,6 @@ def _create_asset(args: argparse.Namespace, *, asset_type: str) -> dict[str, Any
                 "`MongoDB/PostgreSQL` 数据库资产必须填写 `db_name`。",
                 missing_fields=["db_name"],
             )
-
-    duplicates = _existing_assets(
-        client,
-        path=_api_path(asset_type),
-        name=str(payload.get("name") or ""),
-        address=str(payload.get("address") or ""),
-    )
-    if duplicates:
-        raise CLIError(
-            "资产已存在。",
-            payload=build_cli_guidance_payload(
-                "asset_already_exists",
-                user_message="目标组织内已存在同名或同地址资产，已阻止创建。",
-                action_hint="请改用已有资产，或换一个名称/地址。",
-                duplicate_assets=duplicates,
-            ),
-        )
 
     created = client.post(_api_path(asset_type), json_body=payload)
     return {
@@ -1142,7 +1096,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(
             str(spec["command"]),
             help="创建 %s。" % spec["resource_name"] if asset_type == "web" else "创建%s。" % spec["resource_name"],
-            description="POST %s；无 --confirm 只预览，追加 --confirm 才解析引用、查重并创建。" % spec["api_path"],
+            description="POST %s；无 --confirm 只预览，追加 --confirm 才解析引用并创建。" % spec["api_path"],
             epilog="Examples:\n  " + "\n  ".join(CREATE_ASSET_EXAMPLES),
             formatter_class=CLIHelpFormatter,
         )

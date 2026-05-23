@@ -17,11 +17,10 @@ warnings.filterwarnings(
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from .jms_constants import DEFAULT_PAGE_SIZE, DEFAULT_TIMEOUT
 from .jms_types import JumpServerAPIError
 
 
-DEFAULT_TIMEOUT = 30
-DEFAULT_PAGE_SIZE = 100
 AUTHENTICATION_TOKEN_PATH = "/api/v1/authentication/auth/"
 
 
@@ -172,6 +171,20 @@ class JumpServerClient(object):
             headers=prepared.headers,
         )
         response = self._send_prepared(prepared, method=method, signed_path=signed_path)
+        if (
+            response.status_code == 401
+            and self.config.uses_password_auth()
+            and self._password_token
+        ):
+            self._password_token = None
+            prepared = self._prepare_request(method, url, params=params, json_body=json_body)
+            signed_path = self._signed_path(prepared.url)
+            prepared.headers["Authorization"] = self._build_authorization_header(
+                method=method,
+                signed_path=signed_path,
+                headers=prepared.headers,
+            )
+            response = self._send_prepared(prepared, method=method, signed_path=signed_path)
         return self._decode_response(response, method, signed_path)
 
     def _prepare_request(self, method, url, params=None, json_body=None):

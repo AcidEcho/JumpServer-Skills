@@ -15,7 +15,12 @@ ensure_requirements_installed()
 import argparse
 
 from jms_reporting import build_daily_usage_report, validate_report_contract
-from jumpserver_common.jms_runtime import CLIHelpFormatter, print_json, run_and_print
+from jumpserver_common.jms_runtime import (
+    CLIHelpFormatter,
+    print_json,
+    reject_deprecated_pagination_cli_args,
+    run_and_print,
+)
 
 
 DAILY_USAGE_EXAMPLES = [
@@ -83,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    reject_deprecated_pagination_cli_args(
+        sys.argv[1:],
+        script_name="jms_report.py",
+        deprecated_commands={"daily-usage"},
+        usage_examples_by_command={"daily-usage": DAILY_USAGE_EXAMPLES},
+    )
     parser = build_parser()
     args = parser.parse_args()
     if args.command == "contract-check":

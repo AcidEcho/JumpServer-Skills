@@ -384,14 +384,6 @@ def _resolve_reviewer_references(payload: dict[str, Any], *, org_id: str) -> tup
     return resolved_payload, resolved_refs
 
 
-def _existing_by_name(client, *, name: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_LOGIN_ACL_PATH, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-    wanted_name = _text(name)
-    return [_brief_login_acl(item) for item in records if isinstance(item, dict) and _text(item.get("name")) == wanted_name]
-
-
 def _create_login_acl(args: argparse.Namespace):
     payload = _build_login_acl_payload(args)
     _validate_login_acl_payload(payload)
@@ -410,18 +402,6 @@ def _create_login_acl(args: argparse.Namespace):
     org_id = org_id_from_context(org_context)
     client = create_client(org_id=org_id)
     payload, resolved_references = _resolve_reviewer_references(payload, org_id=org_id)
-    duplicates = _existing_by_name(client, name=str(payload.get("name") or ""))
-    if duplicates:
-        raise CLIError(
-            "用户登录控制已存在。",
-            payload=build_cli_guidance_payload(
-                "login_acl_already_exists",
-                user_message="全局组织内已存在同名用户登录控制，已阻止创建。",
-                action_hint="请改用已有用户登录控制，或换一个名称。",
-                duplicate_login_acls=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_LOGIN_ACL_PATH, json_body=payload)
     return {
         "dry_run": False,

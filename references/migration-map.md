@@ -64,33 +64,14 @@
 | 工单、终端组件与存储查询 | `tickets`、`terminals`、`command-storages`、`replay-storages` | `jms_runtime_query.py` | 适用于直接读取工单、终端组件、命令存储、录像存储原始记录 |
 | 报表与账号自动化查询 | `reports`、`report-query`、`account-automation-overview` | `jms_runtime_query.py`、`jms_inspect.py inspect` | 适用于读取报表接口、dashboard 数据以及账号备份/改密/风险/检测任务概览 |
 | 组织与授权关系统计 | `org-resource-overview`、`role-binding-overview`、`endpoint-inventory`、`endpoint-verify` | `jms_inspect.py inspect`、`jms_common.py` | 适用于组织资源盘点、节点数量、RBAC 绑定关系、核心端点 inventory 与按路径验证 |
-| 创建用户 | `jms_create_user.py create-user` | `jms_create_user.py` | 适用于创建本地用户；默认 dry-run，`--confirm` 才 POST |
-| 创建用户组 | `jms_create_user_group.py create-user-group` | `jms_create_user_group.py` | 适用于创建用户组；默认 dry-run，`--confirm` 才 POST；成员通过多个 `--user <user-id>` 添加 |
-| 创建组织 | `jms_create_org.py create-organization` | `jms_create_org.py` | 适用于创建组织；默认 dry-run，`--confirm` 才 POST；请求不带 `X-JMS-ORG` |
-| 邀请用户加入组织 | `jms_invite_user.py invite-user-to-org` | `jms_invite_user.py` | 适用于把全局可见用户邀请到目标组织；默认 dry-run，`--confirm` 才 POST |
-| 添加用户到用户组 | `jms_add_user_to_group.py add-user-to-user-group` | `jms_add_user_to_group.py` | 适用于把目标组织内用户加入目标组织内用户组；默认 dry-run，`--confirm` 才 POST |
-| 创建标签 | `jms_create_label.py create-label` | `jms_create_label.py` | 适用于在目标组织创建标签；默认 dry-run，`--confirm` 才查重并 POST；全局组织禁止 |
-| 创建节点 | `jms_create_node.py create-node` | `jms_create_node.py` | 适用于在目标组织创建资产节点；默认 dry-run，`--confirm` 才 POST `/api/v1/assets/nodes/`；显式组织不写 `.env`；全局组织禁止 |
-| 创建主机/网络设备/数据库/Web 资产 | `jms_create_asset.py create-host-asset/create-device-asset/create-database-asset/create-web-asset` | `jms_create_asset.py` | 适用于在目标组织创建资产；默认 dry-run，`--confirm` 才解析 `platform/nodes/labels/zone/accounts[].template`、查重并 POST；全局组织禁止 |
-| 创建网域 | `jms_create_zone_gateway.py create-zone` | `jms_create_zone_gateway.py` | 适用于在目标组织创建网域；默认 dry-run，`--confirm` 才 POST `/api/v1/assets/zones/`；全局组织禁止 |
-| 创建网关机器 | `jms_create_zone_gateway.py create-gateway` | `jms_create_zone_gateway.py` | 适用于在目标组织创建网关机器；默认 dry-run，`--confirm` 才 POST `/api/v1/assets/gateways/`；全局组织禁止 |
-| 创建账号模板 | `jms_create_account_template.py create-account-template` | `jms_create_account_template.py` | 适用于在目标组织创建账号模板；默认 dry-run，`--confirm` 才 POST `/api/v1/accounts/account-templates/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
-| 给资产批量添加账号 | `jms_asset_account_bulk.py add-account-to-assets` | `jms_asset_account_bulk.py` | 适用于给目标组织内某个或一批资产添加账号；默认 dry-run，`--confirm` 才 POST `/api/v1/accounts/accounts/bulk/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止；密文字段脱敏 |
-| 给资产或节点批量添加账号模板 | `jms_asset_account_bulk.py add-account-template-to-assets` | `jms_asset_account_bulk.py` | 适用于给目标组织内资产或节点添加账号模板；默认 dry-run，`--confirm` 才 POST `/api/v1/accounts/accounts/bulk/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止 |
-| 创建命令组 | `jms_create_command_acl.py create-command-group` | `jms_create_command_acl.py` | 适用于在目标组织创建命令组；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/command-groups/`；显式组织不写 `.env`；全局组织禁止 |
-| 创建命令过滤规则 | `jms_create_command_acl.py create-command-filter-rule` | `jms_create_command_acl.py` | 适用于在目标组织创建命令过滤规则；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/command-filter-acls/`；显式组织不写 `.env`；全局组织禁止 |
-| 创建用户登录控制 | `jms_create_login_acl.py create-login-acl` | `jms_create_login_acl.py` | 适用于在全局组织创建用户登录控制；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/login-acls/`；显式组织或 `.env JMS_ORG_ID` 最终都必须是全局组织 ID；不写 `.env` |
-| 创建连接方式过滤器 | `jms_create_connect_method_acl.py create-connect-method-acl` | `jms_create_connect_method_acl.py` | 适用于在全局组织创建连接方式过滤器；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/connect-method-acls/`；显式组织或 `.env JMS_ORG_ID` 最终都必须是全局组织 ID；不写 `.env` |
-| 创建资产授权规则 | `jms_create_asset_permission.py create-asset-permission` | `jms_create_asset_permission.py` | 适用于在目标组织创建资产授权规则；默认 dry-run，`--confirm` 才 POST `/api/v1/perms/asset-permissions/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止 |
-| 创建资产连接规则 | `jms_create_login_asset_acl.py create-login-asset-acl` | `jms_create_login_asset_acl.py` | 适用于在目标组织创建资产连接规则；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/login-asset-acls/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止 |
-| 创建数据脱敏过滤规则 | `jms_create_data_masking_rule.py create-data-masking-rule` | `jms_create_data_masking_rule.py` | 适用于在目标组织创建数据脱敏过滤规则；默认 dry-run，`--confirm` 才 POST `/api/v1/acls/data-masking-rules/`；显式组织不写 `.env`；未传组织使用 `.env JMS_ORG_ID`；全局组织禁止 |
 | 可疑行为聚合调查 | `suspicious-operation-summary` | `jms_audit.py audit-analyze` | 适用于跨命令、登录、会话、文件传输多接口汇总可疑行为 |
+| 各 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则） | 见 [`subskills/create/references/index.md`](../subskills/create/references/index.md) | 同上 | 命令、入口脚本与每条命令的字段语义见 create 子 skill 的 reference 索引；写操作白名单与组织限制以 [`references/routing-and-safety.md`](routing-and-safety.md) 为唯一来源，本表不再重复 |
 
 ## 缺口清单
 
 | 项目 | 当前状态 | 说明 |
 |---|---|---|
-| 对象创建、更新、删除、解锁 | 部分提供 | 本版只开放 `create-user`、`create-user-group`、`create-organization`、`invite-user-to-org`、`add-user-to-user-group`、`create-label`、`create-node`、`create-host-asset`、`create-device-asset`、`create-database-asset`、`create-web-asset`、`create-zone`、`create-gateway`、`create-account-template`、`add-account-to-assets`、`add-account-template-to-assets`、`create-command-group`、`create-command-filter-rule`、`create-login-acl`、`create-connect-method-acl`、`create-asset-permission`、`create-login-asset-acl` 与 `create-data-masking-rule`；其他对象写操作不提供 |
+| 对象创建、更新、删除、解锁 | 部分提供 | 本版只开放 [`references/routing-and-safety.md`](routing-and-safety.md) 中"允许写操作"白名单里的 23 个 create 命令；其他对象写操作不提供 |
 | 授权追加、移除、删除 | 不提供 | 本仓库仅开放命令过滤规则、用户登录控制、连接方式过滤器、资产授权规则、资产连接规则、数据脱敏过滤规则创建，不承担其他权限写操作 |
 | 资产账号失效状态统一查询 | 待确认 | inventory 未给出统一可依赖的失效字段语义；当前 `expired-account-query` 以 JumpServer 用户账号维度输出 |
 | `/api/v1/perms/asset-permissions/` 在所有环境的可用性 | 待环境验证 | `permissions`、`user-assets`、`user-nodes`、`user-asset-access` 依赖该接口或其等价接口 |
@@ -103,7 +84,7 @@
 - 使用场景与命令示例继续保持示例驱动写法。
 - 把实现差异压缩到技术栈、目录说明和扩展维护小节，不让实现细节成为主叙事。
 - 能力扩展通过 `subskills/query/references/capabilities.md` 和 `references/migration-map.md` 补充，不打断主 README 的使用者阅读路径。
-- README 与 references 只保留 `create-user`、`create-user-group`、`create-organization`、`invite-user-to-org`、`add-user-to-user-group`、`create-label`、`create-node`、`create-host-asset`、`create-device-asset`、`create-database-asset`、`create-web-asset`、`create-zone`、`create-gateway`、`create-account-template`、`add-account-to-assets`、`add-account-template-to-assets`、`create-command-group`、`create-command-filter-rule`、`create-login-acl`、`create-connect-method-acl`、`create-asset-permission`、`create-login-asset-acl`、`create-data-masking-rule` 的 dry-run/confirm 写流程描述。
+- README 与 references 中的 create 写流程描述以 [`references/routing-and-safety.md`](routing-and-safety.md) 的"允许写操作"白名单与 [`subskills/create/references/index.md`](../subskills/create/references/index.md) 的命令-脚本映射为唯一来源，其它文档只链接、不重复枚举。
 
 ## SKILL / README / references 分工
 
@@ -122,4 +103,4 @@
 - 查询能力模块化：统计类、审计类、巡检类都通过 handler + metadata 组合扩展。
 - 文档与代码一一对应：`capability_id -> handler -> endpoint -> reference` 关系是显式的。
 - 对 inventory 未确认的接口保持克制：统一标记“待确认”，不把猜测写进交付物。
-- 只读对象域减少了重复 payload 构造、diff、确认和写后回读维护成本。
+- 查询对象域保持只读，减少了重复 payload 构造、diff、确认和写后回读维护成本；需要创建时只走白名单 create 入口。

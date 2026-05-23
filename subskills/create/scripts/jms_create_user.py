@@ -14,7 +14,12 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 
 ensure_requirements_installed()
 
+from jumpserver_common.jms_create_org_context import (  # noqa: E402
+    preview_create_org_context,
+    resolve_create_org_context,
+)
 from jumpserver_common.jms_discovery import CORE_ENDPOINTS  # noqa: E402
+from jumpserver_common.jms_text_utils import lower_text as _lower  # noqa: E402
 from jumpserver_common.jms_runtime import (  # noqa: E402
     CLIError,
     CLIHelpFormatter,
@@ -62,141 +67,18 @@ def _group_payload(values: list[str] | None) -> list[dict[str, str]]:
     return [{"pk": item} for item in _append_values(values)]
 
 
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _org_id(item: dict[str, Any]) -> str:
-    return str(item.get("id") or "").strip()
-
-
-def _explicit_org_context(org_id: str) -> dict[str, Any]:
-    effective_org = {"id": org_id, "name": "Unknown", "source": "command_explicit"}
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "当前创建范围固定为组织 ID %s；本次命令直接使用该组织请求头。" % org_id,
-    }
-
-
-def _org_name_preview_context(org_name: str) -> dict[str, Any]:
-    return {
-        "effective_org": {"id": "", "name": org_name, "source": "command_org_name_preview"},
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览组织名称 %s；追加 --confirm 后才查询组织、写入 .env 并创建。" % org_name,
-    }
-
-
-def _env_org_preview_context() -> dict[str, Any]:
-    org_id = str(current_runtime_values().get("JMS_ORG_ID") or "").strip()
-    effective_org = {"id": org_id, "name": "Unknown", "source": "env_preview"} if org_id else None
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览 payload；正式创建时未传组织将使用 .env JMS_ORG_ID。",
-    }
-
-
-def _build_org_context(selected_org: dict[str, Any], accessible_orgs: list[dict[str, Any]]) -> dict[str, Any]:
-    effective_org = {**selected_org, "source": "command_explicit"}
-    effective_org_id = _org_id(effective_org)
-    switchable_orgs = [
-        item
-        for item in accessible_orgs
-        if _org_id(item) and _org_id(item) != effective_org_id
-    ]
-    org_scope = "%s (%s)" % (
-        str(effective_org.get("name") or "").strip() or "Unknown",
-        effective_org_id or "<unknown-org-id>",
-    )
-    return {
-        "accessible_orgs": accessible_orgs,
-        "candidate_orgs": accessible_orgs,
-        "effective_org": effective_org,
-        "multiple_accessible_orgs": len(accessible_orgs) > 1,
-        "selection_required": False,
-        "reserved_org_auto_select_eligible": False,
-        "selected_org_accessible": True,
-        "switchable_orgs": switchable_orgs,
-        "switchable_org_count": len(switchable_orgs),
-        "org_context_hint": "当前创建范围固定为组织 %s；本次命令按该组织执行。" % org_scope,
-    }
-
-
-def _raise_org_selector_conflict() -> None:
-    raise CLIError(
-        "组织参数冲突。",
-        payload=build_cli_guidance_payload(
-            AMBIGUOUS_ORG_SELECTOR_REASON_CODE,
-            user_message="创建命令只能传 `--org-id` 或 `--org-name` 其中一个。",
-            action_hint="请保留一个组织定位参数后重试。",
-            provided=["org_id", "org_name"],
-        ),
-    )
-
-
-def _resolve_org_name_context(org_name: str, *, persist: bool) -> dict[str, Any]:
-    accessible_orgs = list_accessible_orgs()
-    wanted = _lower(org_name)
-    matches = [
-        item
-        for item in accessible_orgs
-        if isinstance(item, dict) and _lower(item.get("name")) == wanted
-    ]
-    if not matches:
-        raise CLIError(
-            "指定的组织当前不可访问。",
-            payload=build_cli_guidance_payload(
-                ORG_NOT_ACCESSIBLE_REASON_CODE,
-                user_message="当前账号下找不到你指定的组织，请先从 `candidate_orgs` 里确认可访问组织。",
-                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试；匹配成功后会写入 `.env` 并创建。",
-                org_name=org_name,
-                candidate_orgs=accessible_orgs,
-            ),
-        )
-    if len(matches) > 1:
-        raise CLIError(
-            "给定的组织名称匹配到多个候选组织。",
-            payload=build_cli_guidance_payload(
-                AMBIGUOUS_ORG_REASON_CODE,
-                user_message="当前 `--org-name` 命中了多个组织，请改用更精确的名称。",
-                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试；匹配成功后会写入 `.env` 并创建。",
-                org_name=org_name,
-                candidate_orgs=matches[:10],
-            ),
-        )
-    selected = dict(matches[0])
-    selected_org_id = _org_id(selected)
-    if persist:
-        persist_selected_org(selected_org_id)
-    return _build_org_context(selected, accessible_orgs)
-
-
 def _resolve_create_org_context(args: argparse.Namespace, *, persist_org_name: bool = False) -> dict[str, Any]:
-    requested_org_id = str(getattr(args, "org_id", None) or "").strip()
-    requested_org_name = str(getattr(args, "org_name", None) or "").strip()
-    if requested_org_id and requested_org_name:
-        _raise_org_selector_conflict()
-    if requested_org_id:
-        return _explicit_org_context(requested_org_id)
-    if requested_org_name:
-        return _resolve_org_name_context(requested_org_name, persist=persist_org_name)
-    return ensure_selected_org_context()
+    return resolve_create_org_context(
+        args,
+        persist_org_name=persist_org_name,
+        ensure_selected_org_context=ensure_selected_org_context,
+        list_accessible_orgs=list_accessible_orgs,
+        persist_selected_org=persist_selected_org,
+    )
 
 
 def _preview_create_org_context(args: argparse.Namespace) -> dict[str, Any]:
-    requested_org_id = str(getattr(args, "org_id", None) or "").strip()
-    requested_org_name = str(getattr(args, "org_name", None) or "").strip()
-    if requested_org_id and requested_org_name:
-        _raise_org_selector_conflict()
-    if requested_org_id:
-        return _explicit_org_context(requested_org_id)
-    if requested_org_name:
-        return _org_name_preview_context(requested_org_name)
-    return _env_org_preview_context()
+    return preview_create_org_context(args, current_runtime_values=current_runtime_values)
 
 
 def _redact_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -360,38 +242,6 @@ def _resolve_create_user_references(client, payload: dict[str, Any]) -> dict[str
     return resolved
 
 
-def _existing_users(client, *, username: str, email: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CORE_ENDPOINTS["users"], params={"search": username})
-    if not isinstance(records, list):
-        records = []
-    email_records = client.list_paginated(CORE_ENDPOINTS["users"], params={"search": email})
-    if isinstance(email_records, list):
-        records.extend(email_records)
-
-    matches_by_signature: dict[str, dict[str, Any]] = {}
-    matched_fields_by_signature: dict[str, set[str]] = {}
-    wanted_username = str(username or "").strip().lower()
-    wanted_email = str(email or "").strip().lower()
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        item_id = str(item.get("id") or item.get("pk") or "")
-        signature = item_id or "%s:%s" % (item.get("username"), item.get("email"))
-        matched_fields = matched_fields_by_signature.setdefault(signature, set())
-        if str(item.get("username") or "").strip().lower() == wanted_username:
-            matched_fields.add("username")
-        if wanted_email and str(item.get("email") or "").strip().lower() == wanted_email:
-            matched_fields.add("email")
-        if matched_fields:
-            matches_by_signature.setdefault(signature, item)
-    matches = []
-    for signature, item in matches_by_signature.items():
-        summary = _brief_user(item)
-        summary["matched_fields"] = sorted(matched_fields_by_signature.get(signature) or [])
-        matches.append(summary)
-    return matches
-
-
 def _build_create_user_payload(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "payload", None) and not getattr(args, "filters", None):
         args.filters = args.payload
@@ -515,21 +365,6 @@ def _create_user(args: argparse.Namespace):
 
     org_context = _resolve_create_org_context(args, persist_org_name=True)
     client = create_client(org_id=org_id_from_context(org_context))
-    duplicates = _existing_users(
-        client,
-        username=str(payload.get("username") or ""),
-        email=str(payload.get("email") or ""),
-    )
-    if duplicates:
-        raise CLIError(
-            "用户已存在。",
-            payload=build_cli_guidance_payload(
-                "user_already_exists",
-                user_message="创建前查重发现 username 或 email 已存在，已阻止创建。",
-                action_hint="请确认是否改用已有用户，或换一个 username/email。",
-                duplicate_users=duplicates,
-            ),
-        )
     payload = _resolve_create_user_references(client, payload)
     created = client.post(CREATE_USER_PATH, json_body=payload)
     return {

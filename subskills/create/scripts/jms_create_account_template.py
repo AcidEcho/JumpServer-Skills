@@ -495,25 +495,6 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_account_templates(client, *, name: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_ACCOUNT_TEMPLATE_PATH, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-
-    wanted_name = _text(name)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict) or _text(item.get("name")) != wanted_name:
-            continue
-        signature = str(item.get("id") or item.get("pk") or item.get("name") or "")
-        if signature in seen:
-            continue
-        seen.add(signature)
-        matches.append(_brief_account_template(item))
-    return matches
-
-
 def _list_su_from_templates(client, requested: str) -> list[dict[str, Any]]:
     records = client.list_paginated(
         CREATE_ACCOUNT_TEMPLATE_SU_FROM_PATH,
@@ -612,18 +593,6 @@ def _create_account_template(args: argparse.Namespace):
         _raise_global_target_org_error(target_org_id)
     client = create_client(org_id=target_org_id)
     payload, resolved_references = _resolve_account_template_references(payload, client=client, org_id=target_org_id)
-    duplicates = _existing_account_templates(client, name=str(payload.get("name") or ""))
-    if duplicates:
-        raise CLIError(
-            "账号模板已存在。",
-            payload=build_cli_guidance_payload(
-                "account_template_already_exists",
-                user_message="目标组织内已存在相同 name 的账号模板，已阻止创建。",
-                action_hint="请改用已有账号模板，或换一个 name。",
-                duplicate_account_templates=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_ACCOUNT_TEMPLATE_PATH, json_body=payload)
     return {
         "dry_run": False,
@@ -651,7 +620,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_template = subparsers.add_parser(
         "create-account-template",
         help="创建账号模板。",
-        description="POST /api/v1/accounts/account-templates/；无 --confirm 只预览，追加 --confirm 才查重并创建。",
+        description="POST /api/v1/accounts/account-templates/；无 --confirm 只预览，追加 --confirm 才解析引用并创建。",
         epilog="Examples:\n  " + "\n  ".join(CREATE_ACCOUNT_TEMPLATE_EXAMPLES),
         formatter_class=CLIHelpFormatter,
     )

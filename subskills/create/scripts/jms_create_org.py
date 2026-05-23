@@ -21,7 +21,6 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     build_cli_guidance_payload,
     create_client,
     has_cli_value,
-    list_accessible_orgs,
     merge_filter_args,
     run_and_print,
 )
@@ -32,10 +31,6 @@ CREATE_ORGANIZATION_EXAMPLES = [
     "python3 subskills/create/scripts/jms_create_org.py create-organization --name new",
     "python3 subskills/create/scripts/jms_create_org.py create-organization --name new --comment 备注 --confirm",
 ]
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
 
 
 def _brief_organization(item: dict[str, Any]) -> dict[str, Any]:
@@ -89,24 +84,6 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_organizations(*, name: str) -> list[dict[str, Any]]:
-    records = list_accessible_orgs()
-    wanted = _lower(name)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        if _lower(item.get("name")) != wanted:
-            continue
-        signature = str(item.get("id") or item.get("pk") or item.get("name") or "")
-        if signature in seen:
-            continue
-        seen.add(signature)
-        matches.append(_brief_organization(item))
-    return matches
-
-
 def _create_organization(args: argparse.Namespace):
     payload = _build_create_organization_payload(args)
     _validate_create_organization_payload(payload)
@@ -123,18 +100,6 @@ def _create_organization(args: argparse.Namespace):
             ),
             "org_header": "not_sent",
         }
-
-    duplicates = _existing_organizations(name=str(payload.get("name") or ""))
-    if duplicates:
-        raise CLIError(
-            "组织已存在。",
-            payload=build_cli_guidance_payload(
-                "organization_already_exists",
-                user_message="创建前查重发现组织名称已存在，已阻止创建。",
-                action_hint="请确认是否改用已有组织，或换一个组织名称。",
-                duplicate_organizations=duplicates,
-            ),
-        )
 
     client = create_client(org_id="")
     created = client.post(CREATE_ORGANIZATION_PATH, json_body=payload)

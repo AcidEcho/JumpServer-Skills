@@ -22,8 +22,12 @@
 - 某时间段的 JumpServer 使用概览
 - “堡垒机使用情况” 这类说法
 
+## 相关文件
+
 - [template/bastion-daily-usage-template.html](../../../template/bastion-daily-usage-template.html)
 - [subskills/query/references/metadata/daily_usage_report_template_fields.json](metadata/daily_usage_report_template_fields.json)
+
+## 路由判定
 
 动作词如 `看下` / `看看` / `帮我看看` / `想看` / `过一下` 不改变路由；真正决定路由的是后面跟的是“情况 / 概览 / 汇总 / 排行”，还是“日志 / 记录 / 明细 / 详情”。
 即使用户说的是“分析”，只要核心对象是时间范围内的使用数据分析，也先产出完整 HTML 报告，不退回普通自由文本摘要。

@@ -1,3 +1,19 @@
+"""JumpServer 公共运行时模块。
+
+按下面的逻辑分节阅读：
+
+- Constants & flags      : 顶部常量、reason code、env key 白名单
+- Sensitive redaction    : `mask_secret` / `redact_sensitive` 系列
+- CLI guidance & filters : `CLIError`、`build_cli_guidance_payload`、filter 解析
+- Local env I/O          : `.env` 读写、`config-status`、`get_config_status`
+- Client/discovery build : `build_config`、`create_client`、`create_discovery`
+- Organization context   : 可访问组织、当前组织、显式 / 预览 / 解析组织
+- Platform resolve       : `resolve_platform_reference`
+- Output serialization   : `serialize`、`print_json`、`run_and_print`
+
+所有调用方都通过 `from jumpserver_common.jms_runtime import ...` 拿到所需名字，分节
+注释只是为了让长文件更易导航；不要把任何分节当成"独立模块"。
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from .jms_constants import DEFAULT_PAGE_SIZE, DEFAULT_TIMEOUT
 from .jms_types import JumpServerAPIError, JumpServerConfig, PlatformSpec
 
 if TYPE_CHECKING:
@@ -23,8 +40,9 @@ SKILL_DIR = Path(__file__).resolve().parents[4]
 LOCAL_ENV_FILE = SKILL_DIR / ".env"
 GLOBAL_ORG_ID = "00000000-0000-0000-0000-000000000000"
 DEFAULT_ORG_ID = "00000000-0000-0000-0000-000000000002"
-DEFAULT_PAGE_SIZE = 100
 RESERVED_INTERNAL_ORG_ID = "00000000-0000-0000-0000-000000000004"
+# JumpServer V4.10 保留组织 UUID 约定。若部署环境的 Default/System 组织 UUID 不同，
+# 这里的集合需要同步修改，否则自动选中逻辑会失效。
 RESERVED_AUTO_SELECT_ORG_SETS = frozenset(
     {
         frozenset({DEFAULT_ORG_ID}),
@@ -87,7 +105,6 @@ INVALID_JSON_PAYLOAD_REASON_CODE = "invalid_json_payload"
 INVALID_FILTER_ASSIGNMENT_REASON_CODE = "invalid_filter_assignment"
 CONFIRMATION_REQUIRED_REASON_CODE = "confirmation_required"
 DEPRECATED_PAGINATION_REASON_CODE = "deprecated_pagination_args"
-DEFAULT_TIMEOUT = 30
 _GLOBAL_ORG_PROBE_ATTEMPTED = False
 _GLOBAL_ORG_PROBE_RESULT: dict[str, Any] | None = None
 ENTRYPOINT_SCRIPT_REFS = {
@@ -123,6 +140,9 @@ def _script_ref(script_name: str) -> str:
     return ENTRYPOINT_SCRIPT_REFS.get(str(script_name or "").strip(), str(script_name or "").strip())
 
 
+# ---------------------------------------------------------------------------
+# Section: CLI guidance & filters
+# ---------------------------------------------------------------------------
 class CLIHelpFormatter(argparse.ArgumentDefaultsHelpFormatter, argparse.RawTextHelpFormatter):
     """Argparse formatter that keeps example newlines while still showing defaults."""
 
@@ -145,6 +165,9 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
+# ---------------------------------------------------------------------------
+# Section: Sensitive redaction
+# ---------------------------------------------------------------------------
 def mask_secret(value: Any) -> str:
     text = str(value or "")
     if not text:
@@ -275,6 +298,9 @@ def parse_filter_assignments(
     return payload
 
 
+# ---------------------------------------------------------------------------
+# Section: Local env I/O
+# ---------------------------------------------------------------------------
 def read_local_env(path: Path | None = None) -> dict[str, str]:
     env_path = Path(path or LOCAL_ENV_FILE)
     if not env_path.exists():
@@ -595,6 +621,9 @@ def require_confirmation(args: argparse.Namespace) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Section: Client / discovery build
+# ---------------------------------------------------------------------------
 def build_config(*, org_id: str | None = None) -> JumpServerConfig:
     load_local_env()
     values = current_runtime_values()
@@ -657,6 +686,9 @@ def create_discovery(*, org_id: str | None = None) -> JumpServerDiscovery:
     return JumpServerDiscovery(create_client(org_id=org_id))
 
 
+# ---------------------------------------------------------------------------
+# Section: Organization context
+# ---------------------------------------------------------------------------
 def _global_org_probe_error(exc: JumpServerAPIError) -> bool:
     if exc.status_code in {403, 404}:
         return True
@@ -1107,6 +1139,9 @@ def org_id_from_context(context: dict[str, Any] | None, *, default: str = "") ->
     return value or default
 
 
+# ---------------------------------------------------------------------------
+# Section: Platform resolve
+# ---------------------------------------------------------------------------
 def resolve_platform_reference(value: str, *, discovery: JumpServerDiscovery | None = None) -> dict[str, Any]:
     active_discovery = discovery or create_discovery()
     wanted = str(value or "").strip().lower()
@@ -1127,6 +1162,9 @@ def resolve_platform_reference(value: str, *, discovery: JumpServerDiscovery | N
     return {"status": "candidate_only", "resolved": None, "candidates": category_matches}
 
 
+# ---------------------------------------------------------------------------
+# Section: Output serialization
+# ---------------------------------------------------------------------------
 def serialize(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.isoformat()

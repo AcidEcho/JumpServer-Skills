@@ -14,6 +14,18 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 
 ensure_requirements_installed()
 
+from jumpserver_common.jms_text_utils import (
+    exact_first_filter as _exact_first_filter,
+    lower_text as _lower,
+    value_from_path as _value_from_path,
+)
+from jumpserver_common.jms_permission_match import (
+    asset_node_paths as _asset_node_paths,
+    build_node_lookup,
+    match_permission_to_asset,
+    node_full_value,
+    permission_node_paths as _permission_node_paths,
+)
 from jumpserver_common.jms_runtime import (
     CLIError,
     CLIHelpFormatter,
@@ -32,10 +44,6 @@ from jumpserver_common.jms_runtime import (
 
 
 PERMISSION_PATH = "/api/v1/perms/asset-permissions/"
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
 
 
 def _parse_display_style_value(value: Any) -> dict[str, str] | None:
@@ -61,31 +69,6 @@ def _parse_display_style_asset(value: Any) -> dict[str, str] | None:
     if parsed is None:
         return None
     return {"name": parsed["name"], "address": parsed["inner"]}
-
-
-def _value_from_path(item: dict[str, Any], path: str) -> Any:
-    current: Any = item
-    for part in path.split("."):
-        if not isinstance(current, dict):
-            return None
-        current = current.get(part)
-    return current
-
-
-def _exact_first_filter(items: list[dict[str, Any]], expected: Any, *paths: str) -> list[dict[str, Any]]:
-    wanted = _lower(expected)
-    if not wanted:
-        return items
-    exact_matches = []
-    partial_matches = []
-    for item in items:
-        values = [_value_from_path(item, path) for path in paths]
-        text_values = [_lower(value) for value in values if value not in {None, ""}]
-        if wanted in text_values:
-            exact_matches.append(item)
-        elif any(wanted in value for value in text_values):
-            partial_matches.append(item)
-    return exact_matches or partial_matches
 
 
 def _resolve_user(target: str | None = None, username: str | None = None, *, discovery=None) -> dict[str, Any]:
@@ -184,167 +167,6 @@ def _resolve_asset(target: str | None = None, name: str | None = None, *, discov
             ),
         )
     return matches[0]
-
-
-def node_full_value(node_lookup, node_id: str, *, fallback_name: str | None = None) -> str:
-    node = node_lookup.get(node_id) or {}
-    full_value = str(node.get("full_value") or "").strip()
-    if full_value:
-        return full_value
-    fallback = str(fallback_name or "").strip()
-    if fallback.startswith("/"):
-        return fallback
-    name = str(node.get("value") or node.get("name") or fallback).strip()
-    return "/%s" % name if name else ""
-
-
-def build_node_lookup(*, discovery=None) -> dict[str, dict[str, Any]]:
-    active_discovery = discovery or create_discovery()
-    return {
-        str(item.get("id") or "").strip(): item
-        for item in active_discovery.list_nodes()
-        if isinstance(item, dict) and str(item.get("id") or "").strip()
-    }
-
-
-def _asset_node_paths(asset: dict[str, Any], *, node_lookup) -> list[dict[str, Any]]:
-    paths: list[dict[str, Any]] = []
-    seen_paths: set[str] = set()
-    for node in asset.get("nodes", []) or []:
-        if not isinstance(node, dict):
-            continue
-        node_id = str(node.get("id") or "").strip()
-        resolved_path = node_full_value(
-            node_lookup,
-            node_id,
-            fallback_name=str(node.get("full_value") or node.get("name") or node.get("value") or ""),
-        )
-        if not resolved_path or resolved_path in seen_paths:
-            continue
-        seen_paths.add(resolved_path)
-        paths.append(
-            {
-                "path": resolved_path,
-                "node_id": node_id or None,
-                "node_name": str(node.get("name") or node.get("value") or "").strip() or None,
-                "source": "asset.nodes",
-            }
-        )
-    for display in asset.get("nodes_display", []) or []:
-        display_text = str(display or "").strip()
-        if not display_text or display_text in seen_paths:
-            continue
-        seen_paths.add(display_text)
-        paths.append({"path": display_text, "node_id": None, "node_name": None, "source": "asset.nodes_display"})
-    return paths
-
-
-def _permission_node_paths(permission: dict[str, Any], *, node_lookup) -> list[dict[str, Any]]:
-    paths: list[dict[str, Any]] = []
-    seen_paths: set[str] = set()
-    for node in permission.get("nodes", []) or []:
-        if isinstance(node, dict):
-            node_id = str(node.get("id") or "").strip()
-            fallback_name = str(node.get("full_value") or node.get("name") or node.get("value") or "")
-            resolved_path = node_full_value(node_lookup, node_id, fallback_name=fallback_name)
-            node_name = str(node.get("name") or node.get("value") or "").strip() or None
-        else:
-            node_id = str(node or "").strip()
-            resolved_path = node_full_value(node_lookup, node_id, fallback_name=node_id)
-            node_name = None
-        if not resolved_path or resolved_path in seen_paths:
-            continue
-        seen_paths.add(resolved_path)
-        paths.append(
-            {
-                "path": resolved_path,
-                "node_id": node_id or None,
-                "node_name": node_name,
-                "source": "permission.nodes",
-            }
-        )
-    return paths
-
-
-def match_permission_to_asset(permission: dict[str, Any], asset: dict[str, Any], *, node_lookup) -> dict[str, Any] | None:
-    asset_id = str(asset.get("id") or "").strip()
-    permission_asset_ids = {
-        str(obj.get("id", obj)).strip()
-        for obj in permission.get("assets", []) or []
-        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
-    }
-    if asset_id and asset_id in permission_asset_ids:
-        return {
-            "match_source": "direct_asset",
-            "match_evidence": {
-                "matched_asset_id": asset_id,
-                "permission_asset_ids": sorted(permission_asset_ids),
-            },
-        }
-
-    asset_label_ids = {
-        str(obj.get("id", obj)).strip()
-        for obj in asset.get("labels", []) or []
-        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
-    }
-    permission_label_ids = {
-        str(obj.get("id", obj)).strip()
-        for obj in permission.get("labels", []) or []
-        if str(obj.get("id", obj) if isinstance(obj, dict) else obj).strip()
-    }
-    matched_label_ids = sorted(asset_label_ids & permission_label_ids)
-    if matched_label_ids:
-        return {
-            "match_source": "shared_label",
-            "match_evidence": {
-                "matched_label_ids": matched_label_ids,
-                "asset_label_ids": sorted(asset_label_ids),
-                "permission_label_ids": sorted(permission_label_ids),
-            },
-        }
-
-    asset_paths = _asset_node_paths(asset, node_lookup=node_lookup)
-    permission_paths = _permission_node_paths(permission, node_lookup=node_lookup)
-    path_matches: list[dict[str, Any]] = []
-    for asset_path in asset_paths:
-        asset_value = str(asset_path.get("path") or "").strip()
-        if not asset_value:
-            continue
-        for permission_path in permission_paths:
-            permission_value = str(permission_path.get("path") or "").strip()
-            if not permission_value:
-                continue
-            prefix = permission_value.rstrip("/") + "/"
-            if asset_value == permission_value or asset_value.startswith(prefix):
-                depth = len([part for part in permission_value.split("/") if part])
-                path_matches.append(
-                    {
-                        "depth": depth,
-                        "asset_path": asset_path,
-                        "permission_path": permission_path,
-                        "relationship": "exact" if asset_value == permission_value else "ancestor_prefix",
-                    }
-                )
-    if path_matches:
-        best_match = sorted(
-            path_matches,
-            key=lambda item: (
-                int(item.get("depth") or 0),
-                len(str((item.get("permission_path") or {}).get("path") or "")),
-            ),
-            reverse=True,
-        )[0]
-        return {
-            "match_source": "node_ancestor",
-            "match_evidence": {
-                "relationship": best_match["relationship"],
-                "matched_asset_path": best_match["asset_path"],
-                "matched_permission_path": best_match["permission_path"],
-                "asset_node_paths": asset_paths,
-                "permission_node_paths": permission_paths,
-            },
-        }
-    return None
 
 
 def _list_permissions(*, client=None) -> list[dict[str, Any]]:

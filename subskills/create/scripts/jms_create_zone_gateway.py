@@ -23,11 +23,13 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     build_cli_guidance_payload,
     create_client,
     create_discovery,
-    current_runtime_values,
+    create_env_org_context,
     has_cli_value,
     merge_filter_args,
     org_context_output,
     org_id_from_context,
+    preview_create_org_context,
+    raise_create_global_org_error,
     resolve_command_org_context,
     run_and_print,
 )
@@ -279,79 +281,31 @@ def _find_unique_reference(
     )
 
 
+_GLOBAL_USER_MESSAGE = "创建网域或网关机器时，目标组织不能使用全局组织 ID。"
+
+
 def _raise_global_target_org_error(org_id: str) -> None:
-    raise CLIError(
-        "目标组织不能是全局组织。",
-        payload=build_cli_guidance_payload(
-            "organization_not_accessible",
-            user_message="创建网域或网关机器时，目标组织不能使用全局组织 ID。",
-            action_hint="请改用具体目标组织 ID 或 `--org-name <target-org>`。",
-            org_id=org_id,
-        ),
+    raise_create_global_org_error(
+        org_id,
+        resource_name="网域/网关机器创建",
+        user_message=_GLOBAL_USER_MESSAGE,
     )
 
 
 def _env_org_context(resource_name: str) -> dict[str, Any]:
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if not org_id:
-        raise CLIError(
-            "未选择目标组织。",
-            payload=build_cli_guidance_payload(
-                "organization_selection_required",
-                user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定%s创建组织。" % resource_name,
-                action_hint="请传入 `--org-id <org-id>` 或 `--org-name <name>`，或先用 common 子 skill 选择当前组织。",
-            ),
-        )
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    return {
-        "effective_org": {"id": org_id, "name": "Unknown", "source": "env"},
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "当前命令范围使用 .env JMS_ORG_ID=%s；不写入 .env。" % org_id,
-    }
+    return create_env_org_context(
+        resource_name=resource_name,
+        missing_user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定%s创建组织。" % resource_name,
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _preview_org_context(args: argparse.Namespace) -> dict[str, Any]:
-    requested_org_id = _text(getattr(args, "org_id", None))
-    requested_org_name = _text(getattr(args, "org_name", None))
-    if requested_org_id and requested_org_name:
-        raise CLIError(
-            "组织参数冲突。",
-            payload=build_cli_guidance_payload(
-                "ambiguous_organization_selector",
-                user_message="命令只能传 `--org-id` 或 `--org-name` 其中一个。",
-                action_hint="请保留一个组织定位参数后重试。",
-                provided=["org_id", "org_name"],
-            ),
-        )
-    if requested_org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(requested_org_id)
-    if requested_org_id:
-        return {
-            "effective_org": {"id": requested_org_id, "name": "Unknown", "source": "command_explicit_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织 ID %s；追加 --confirm 后才解析组织并创建。" % requested_org_id,
-        }
-    if requested_org_name:
-        return {
-            "effective_org": {"id": "", "name": requested_org_name, "source": "command_org_name_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织名称 %s；追加 --confirm 后才查询组织并创建。" % requested_org_name,
-        }
-
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    effective_org = {"id": org_id, "name": "Unknown", "source": "env_preview"} if org_id else None
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览 payload；正式创建时未传组织将使用 .env JMS_ORG_ID。",
-    }
+    return preview_create_org_context(
+        args,
+        resource_name="创建网域/网关机器",
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _resolve_org_context(args: argparse.Namespace, resource_name: str) -> dict[str, Any]:
@@ -557,41 +511,6 @@ def _gateway_payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_zones(client, *, name: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_ZONE_PATH, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-    wanted_name = _text(name)
-    return [_brief_zone(item) for item in records if isinstance(item, dict) and _text(item.get("name")) == wanted_name]
-
-
-def _existing_gateways(client, *, name: str, address: str) -> list[dict[str, Any]]:
-    records = []
-    seen_searches = set()
-    for search in (name, address):
-        search = _text(search)
-        if not search or search in seen_searches:
-            continue
-        seen_searches.add(search)
-        result = client.list_paginated(CREATE_GATEWAY_PATH, params={"search": search})
-        if isinstance(result, list):
-            records.extend(result)
-    wanted_name = _text(name)
-    wanted_address = _text(address)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        if _text(item.get("name")) == wanted_name or _text(item.get("address")) == wanted_address:
-            signature = str(item.get("id") or item.get("pk") or "%s:%s" % (item.get("name"), item.get("address")))
-            if signature in seen:
-                continue
-            seen.add(signature)
-            matches.append(_brief_gateway(item))
-    return matches
-
-
 def _resolve_gateway_pk_list(
     values: list[dict[str, Any]],
     *,
@@ -715,18 +634,6 @@ def _create_zone(args: argparse.Namespace):
 
     org_context = _resolve_org_context(args, "网域")
     client = create_client(org_id=org_id_from_context(org_context))
-    duplicates = _existing_zones(client, name=str(payload.get("name") or ""))
-    if duplicates:
-        raise CLIError(
-            "网域已存在。",
-            payload=build_cli_guidance_payload(
-                "zone_already_exists",
-                user_message="目标组织内已存在同名网域，已阻止创建。",
-                action_hint="请改用已有网域，或换一个名称。",
-                duplicate_zones=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_ZONE_PATH, json_body=payload)
     return {
         "dry_run": False,
@@ -755,22 +662,6 @@ def _create_gateway(args: argparse.Namespace):
     org_id = org_id_from_context(org_context)
     client = create_client(org_id=org_id)
     payload, resolved_references = _resolve_gateway_references(payload, client=client, org_id=org_id)
-    duplicates = _existing_gateways(
-        client,
-        name=str(payload.get("name") or ""),
-        address=str(payload.get("address") or ""),
-    )
-    if duplicates:
-        raise CLIError(
-            "网关机器已存在。",
-            payload=build_cli_guidance_payload(
-                "gateway_already_exists",
-                user_message="目标组织内已存在同名或同地址网关机器，已阻止创建。",
-                action_hint="请改用已有网关机器，或换一个名称/地址。",
-                duplicate_gateways=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_GATEWAY_PATH, json_body=payload)
     return {
         "dry_run": False,

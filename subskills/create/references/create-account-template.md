@@ -1,8 +1,10 @@
 # Create Account Template
 
-API：`POST /api/v1/accounts/account-templates/`
+## API
 
-入口：
+`POST /api/v1/accounts/account-templates/`
+
+## 入口
 
 ```bash
 python3 subskills/create/scripts/jms_create_account_template.py create-account-template ...
@@ -30,7 +32,7 @@ python3 subskills/create/scripts/jms_create_account_template.py create-account-t
 - `--org-id` 与 `--org-name` 不能同时传。
 - 显式 `--org-id` / `--org-name` 只限定本次命令，不写 `.env`。
 - `--org-name --confirm` 会查询当前 AK/SK 可访问组织；唯一匹配后按该组织创建，但不写 `.env JMS_ORG_ID`。
-- dry-run 不写 `.env`，不 POST，不查重；传 `--org-name` 时只预览组织名。
+- dry-run 不写 `.env`，不 POST；传 `--org-name` 时只预览组织名。
 - 全局组织禁止；不能在 `00000000-0000-0000-0000-000000000000` 下创建。
 
 ## 示例

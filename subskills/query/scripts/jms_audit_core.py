@@ -10,6 +10,10 @@ import hashlib
 import json
 import re
 from typing import Any
+from jumpserver_common.jms_text_utils import (
+    lower_text as _lower,
+    value_from_path as _value_from_path,
+)
 from jumpserver_common.jms_runtime import (
     CLIError,
     build_cli_guidance_payload,
@@ -206,9 +210,6 @@ def _runtime_local_timezone() -> tzinfo:
 def _local_now() -> datetime:
     return datetime.now(_runtime_local_timezone())
 
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
-
 def parse_date_value(value: Any) -> date | None:
     if value in {None, ""}:
         return None
@@ -281,15 +282,6 @@ def _coalesce(*values: Any) -> Any:
             continue
         return value
     return None
-
-def _value_from_path(item: dict[str, Any], path: str) -> Any:
-    current: Any = item
-    for part in path.split("."):
-        if isinstance(current, dict):
-            current = current.get(part)
-        else:
-            return None
-    return current
 
 def _string_value(value: Any) -> str:
     if isinstance(value, dict):

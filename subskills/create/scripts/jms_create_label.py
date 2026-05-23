@@ -127,28 +127,6 @@ def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_labels(client, *, name: str, value: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_LABEL_PATH, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-
-    wanted_name = _text(name)
-    wanted_value = _text(value)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        if _text(item.get("name")) != wanted_name or _text(item.get("value")) != wanted_value:
-            continue
-        signature = str(item.get("id") or item.get("pk") or "%s:%s" % (item.get("name"), item.get("value")))
-        if signature in seen:
-            continue
-        seen.add(signature)
-        matches.append(_brief_label(item))
-    return matches
-
-
 def _create_label(args: argparse.Namespace):
     payload = _build_create_label_payload(args)
     _validate_create_label_payload(payload)
@@ -169,22 +147,6 @@ def _create_label(args: argparse.Namespace):
 
     org_context = _resolve_label_org_context(args)
     client = create_client(org_id=org_id_from_context(org_context))
-    duplicates = _existing_labels(
-        client,
-        name=str(payload.get("name") or ""),
-        value=str(payload.get("value") or ""),
-    )
-    if duplicates:
-        raise CLIError(
-            "标签已存在。",
-            payload=build_cli_guidance_payload(
-                "label_already_exists",
-                user_message="目标组织内已存在相同 name 和 value 的标签，已阻止创建。",
-                action_hint="请改用已有标签，或换一个 name/value 组合。",
-                duplicate_labels=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_LABEL_PATH, json_body=payload)
     return {
         "dry_run": False,

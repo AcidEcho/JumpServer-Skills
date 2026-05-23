@@ -15,6 +15,7 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 ensure_requirements_installed()
 
 from jumpserver_common.jms_discovery import CORE_ENDPOINTS  # noqa: E402
+from jumpserver_common.jms_text_utils import lower_text as _lower  # noqa: E402
 from jumpserver_common.jms_runtime import (  # noqa: E402
     CLIError,
     CLIHelpFormatter,
@@ -27,6 +28,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
+    raise_create_global_org_error,
     resolve_command_org_context,
     run_and_print,
 )
@@ -43,10 +45,6 @@ INVITE_USER_EXAMPLES = [
         "--org-name Default --user zhangsan --org-role 组织用户 --confirm"
     ),
 ]
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
 
 
 def _append_values(values: list[str] | None) -> list[str]:
@@ -90,14 +88,10 @@ def _preview_org_context(args: argparse.Namespace) -> dict[str, Any]:
             ),
         )
     if requested_org_id == GLOBAL_ORG_ID:
-        raise CLIError(
-            "邀请目标组织不能是全局组织。",
-            payload=build_cli_guidance_payload(
-                "organization_not_accessible",
-                user_message="邀请用户加入组织时，目标组织不能使用全局组织 ID。",
-                action_hint="请改用具体目标组织 ID 或 `--org-name <target-org>`。",
-                org_id=requested_org_id,
-            ),
+        raise_create_global_org_error(
+            requested_org_id,
+            resource_name="邀请用户加入组织",
+            user_message="邀请用户加入组织时，目标组织不能使用全局组织 ID。",
         )
     if requested_org_id:
         return {

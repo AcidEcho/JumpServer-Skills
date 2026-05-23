@@ -16,6 +16,10 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 ensure_requirements_installed()
 
 from jumpserver_common.jms_discovery import CORE_ENDPOINTS  # noqa: E402
+from jumpserver_common.jms_text_utils import (  # noqa: E402
+    lower_text as _lower,
+    text as _text,
+)
 from jumpserver_common.jms_runtime import (  # noqa: E402
     CLIError,
     CLIHelpFormatter,
@@ -23,12 +27,14 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     build_cli_guidance_payload,
     create_client,
     create_discovery,
-    current_runtime_values,
+    create_env_org_context,
     has_cli_value,
     is_uuid_like,
     mask_secret,
     org_context_output,
     org_id_from_context,
+    preview_create_org_context,
+    raise_create_global_org_error,
     resolve_command_org_context,
     run_and_print,
 )
@@ -89,10 +95,6 @@ ADD_TEMPLATE_EXAMPLES = [
         "--org-name Default --secret-type password --template root-template --asset web-01 --confirm"
     ),
 ]
-
-
-def _text(value: Any) -> str:
-    return str(value or "").strip()
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -312,71 +314,33 @@ def _validate_add_template_payload(payload: dict[str, Any]) -> None:
         )
 
 
+_GLOBAL_USER_MESSAGE = "批量添加资产账号时，目标组织不能使用全局组织 ID。"
+
+
 def _raise_global_target_org_error(org_id: str) -> None:
-    raise CLIError(
-        "目标组织不能是全局组织。",
-        payload=build_cli_guidance_payload(
-            "organization_not_accessible",
-            user_message="批量添加资产账号时，目标组织不能使用全局组织 ID。",
-            action_hint="请改用具体目标组织 ID 或 `--org-name <target-org>`。",
-            org_id=org_id,
-        ),
+    raise_create_global_org_error(
+        org_id,
+        resource_name="批量添加资产账号",
+        user_message=_GLOBAL_USER_MESSAGE,
     )
 
 
 def _env_org_context() -> dict[str, Any]:
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if not org_id:
-        raise CLIError(
-            "未选择目标组织。",
-            payload=build_cli_guidance_payload(
-                "organization_selection_required",
-                user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定批量添加目标组织。",
-                action_hint="请传入 `--org-id <org-id>` 或 `--org-name <name>`，或先用 common 子 skill 选择当前组织。",
-            ),
-        )
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    return {
-        "effective_org": {"id": org_id, "name": "Unknown", "source": "env"},
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "当前命令范围使用 .env JMS_ORG_ID=%s；不写入 .env。" % org_id,
-    }
+    return create_env_org_context(
+        resource_name="批量添加资产账号",
+        missing_user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定批量添加目标组织。",
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _preview_org_context(args: argparse.Namespace) -> dict[str, Any]:
-    requested_org_id = _text(getattr(args, "org_id", None))
-    requested_org_name = _text(getattr(args, "org_name", None))
-    if requested_org_id and requested_org_name:
-        resolve_command_org_context(args, allow_global=False, fallback_to_selected=False)
-    if requested_org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(requested_org_id)
-    if requested_org_id:
-        return {
-            "effective_org": {"id": requested_org_id, "name": "Unknown", "source": "command_explicit_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织 ID %s；追加 --confirm 后才解析组织并批量添加。" % requested_org_id,
-        }
-    if requested_org_name:
-        return {
-            "effective_org": {"id": "", "name": requested_org_name, "source": "command_org_name_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织名称 %s；追加 --confirm 后才查询组织并批量添加。" % requested_org_name,
-        }
-
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    effective_org = {"id": org_id, "name": "Unknown", "source": "env_preview"} if org_id else None
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览 payload；正式批量添加时未传组织将使用 .env JMS_ORG_ID。",
-    }
+    return preview_create_org_context(
+        args,
+        resource_name="批量添加资产账号",
+        confirm_action="批量添加",
+        no_org_hint="dry-run 仅预览 payload；正式批量添加时未传组织将使用 .env JMS_ORG_ID。",
+        global_user_message=_GLOBAL_USER_MESSAGE,
+    )
 
 
 def _resolve_org_context(args: argparse.Namespace) -> dict[str, Any]:
@@ -394,10 +358,6 @@ def _field_value(item: dict[str, Any], field: str) -> Any:
             return None
         current = current.get(part)
     return current
-
-
-def _lower(value: Any) -> str:
-    return str(value or "").strip().lower()
 
 
 def _brief_resource(resource: str, item: dict[str, Any]) -> dict[str, Any]:

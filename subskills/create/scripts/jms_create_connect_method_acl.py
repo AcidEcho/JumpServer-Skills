@@ -336,18 +336,6 @@ def _brief_connect_method_acl(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _existing_by_name(client, *, name: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_CONNECT_METHOD_ACL_PATH, params={"search": name})
-    if not isinstance(records, list):
-        records = []
-    wanted_name = _text(name)
-    return [
-        _brief_connect_method_acl(item)
-        for item in records
-        if isinstance(item, dict) and _text(item.get("name")) == wanted_name
-    ]
-
-
 def _create_connect_method_acl(args: argparse.Namespace):
     payload = _build_connect_method_acl_payload(args)
     _validate_connect_method_acl_payload(payload)
@@ -365,18 +353,6 @@ def _create_connect_method_acl(args: argparse.Namespace):
     org_context = _resolve_global_org_context(args)
     client = create_client(org_id=org_id_from_context(org_context))
     payload, resolved_connect_methods = _resolve_connect_methods(client, payload)
-    duplicates = _existing_by_name(client, name=str(payload.get("name") or ""))
-    if duplicates:
-        raise CLIError(
-            "连接方式过滤器已存在。",
-            payload=build_cli_guidance_payload(
-                "connect_method_acl_already_exists",
-                user_message="全局组织内已存在同名连接方式过滤器，已阻止创建。",
-                action_hint="请改用已有连接方式过滤器，或换一个名称。",
-                duplicate_connect_method_acls=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_CONNECT_METHOD_ACL_PATH, json_body=payload)
     return {
         "dry_run": False,

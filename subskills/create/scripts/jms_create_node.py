@@ -14,6 +14,7 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 
 ensure_requirements_installed()
 
+from jumpserver_common.jms_text_utils import text as _text  # noqa: E402
 from jumpserver_common.jms_runtime import (  # noqa: E402
     CLIError,
     CLIHelpFormatter,
@@ -21,11 +22,13 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     add_filter_arguments,
     build_cli_guidance_payload,
     create_client,
-    current_runtime_values,
+    create_env_org_context,
     has_cli_value,
     merge_filter_args,
     org_context_output,
     org_id_from_context,
+    preview_create_org_context,
+    raise_create_global_org_error,
     resolve_command_org_context,
     run_and_print,
 )
@@ -45,10 +48,6 @@ CREATE_NODE_EXAMPLES = [
 ]
 
 
-def _text(value: Any) -> str:
-    return str(value or "").strip()
-
-
 def _brief_node(item: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": item.get("id") or item.get("pk"),
@@ -60,78 +59,27 @@ def _brief_node(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _raise_global_target_org_error(org_id: str) -> None:
-    raise CLIError(
-        "创建节点的目标组织不能是全局组织。",
-        payload=build_cli_guidance_payload(
-            "organization_not_accessible",
-            user_message="创建节点时，目标组织不能使用全局组织 ID。",
-            action_hint="请改用具体目标组织 ID 或 `--org-name <target-org>`。",
-            org_id=org_id,
-        ),
+    raise_create_global_org_error(
+        org_id,
+        resource_name="节点创建",
+        user_message="创建节点时，目标组织不能使用全局组织 ID。",
     )
 
 
 def _env_org_context() -> dict[str, Any]:
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if not org_id:
-        raise CLIError(
-            "未选择目标组织。",
-            payload=build_cli_guidance_payload(
-                "organization_selection_required",
-                user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定节点创建组织。",
-                action_hint="请传入 `--org-id <org-id>` 或 `--org-name <name>`，或先用 common 子 skill 选择当前组织。",
-            ),
-        )
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    return {
-        "effective_org": {"id": org_id, "name": "Unknown", "source": "env"},
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "当前命令范围使用 .env JMS_ORG_ID=%s；不写入 .env。" % org_id,
-    }
+    return create_env_org_context(
+        resource_name="节点创建",
+        missing_user_message="未传 `--org-id/--org-name`，且 `.env JMS_ORG_ID` 为空，无法确定节点创建组织。",
+        global_user_message="创建节点时，目标组织不能使用全局组织 ID。",
+    )
 
 
 def _preview_org_context(args: argparse.Namespace) -> dict[str, Any]:
-    requested_org_id = _text(getattr(args, "org_id", None))
-    requested_org_name = _text(getattr(args, "org_name", None))
-    if requested_org_id and requested_org_name:
-        raise CLIError(
-            "组织参数冲突。",
-            payload=build_cli_guidance_payload(
-                "ambiguous_organization_selector",
-                user_message="命令只能传 `--org-id` 或 `--org-name` 其中一个。",
-                action_hint="请保留一个组织定位参数后重试。",
-                provided=["org_id", "org_name"],
-            ),
-        )
-    if requested_org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(requested_org_id)
-    if requested_org_id:
-        return {
-            "effective_org": {"id": requested_org_id, "name": "Unknown", "source": "command_explicit_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织 ID %s；追加 --confirm 后才解析组织并创建。" % requested_org_id,
-        }
-    if requested_org_name:
-        return {
-            "effective_org": {"id": "", "name": requested_org_name, "source": "command_org_name_preview"},
-            "switchable_orgs": [],
-            "switchable_org_count": 0,
-            "org_context_hint": "dry-run 仅预览组织名称 %s；追加 --confirm 后才查询组织并创建。" % requested_org_name,
-        }
-
-    org_id = _text(current_runtime_values().get("JMS_ORG_ID"))
-    if org_id == GLOBAL_ORG_ID:
-        _raise_global_target_org_error(org_id)
-    effective_org = {"id": org_id, "name": "Unknown", "source": "env_preview"} if org_id else None
-    return {
-        "effective_org": effective_org,
-        "switchable_orgs": [],
-        "switchable_org_count": 0,
-        "org_context_hint": "dry-run 仅预览 payload；正式创建时未传组织将使用 .env JMS_ORG_ID。",
-    }
+    return preview_create_org_context(
+        args,
+        resource_name="创建节点",
+        global_user_message="创建节点时，目标组织不能使用全局组织 ID。",
+    )
 
 
 def _resolve_node_org_context(args: argparse.Namespace) -> dict[str, Any]:
@@ -249,25 +197,6 @@ def _preview_payload_for_org(payload: dict[str, Any], org_context: dict[str, Any
     return preview_payload
 
 
-def _existing_nodes(client, *, full_value: str) -> list[dict[str, Any]]:
-    records = client.list_paginated(CREATE_NODE_PATH, params={"search": full_value})
-    if not isinstance(records, list):
-        records = []
-
-    wanted_full_value = _text(full_value)
-    matches = []
-    seen = set()
-    for item in records:
-        if not isinstance(item, dict) or _text(item.get("full_value")) != wanted_full_value:
-            continue
-        signature = str(item.get("id") or item.get("pk") or item.get("full_value") or "")
-        if signature in seen:
-            continue
-        seen.add(signature)
-        matches.append(_brief_node(item))
-    return matches
-
-
 def _create_node(args: argparse.Namespace):
     payload = _build_create_node_payload(args)
     _validate_create_node_payload(payload)
@@ -287,18 +216,6 @@ def _create_node(args: argparse.Namespace):
     target_org_id = org_id_from_context(org_context)
     payload = _ensure_payload_org_matches_target(payload, target_org_id)
     client = create_client(org_id=target_org_id)
-    duplicates = _existing_nodes(client, full_value=str(payload.get("full_value") or ""))
-    if duplicates:
-        raise CLIError(
-            "节点已存在。",
-            payload=build_cli_guidance_payload(
-                "node_already_exists",
-                user_message="目标组织内已存在相同 full_value 的节点，已阻止创建。",
-                action_hint="请改用已有节点，或换一个 full_value。",
-                duplicate_nodes=duplicates,
-            ),
-        )
-
     created = client.post(CREATE_NODE_PATH, json_body=payload)
     return {
         "dry_run": False,

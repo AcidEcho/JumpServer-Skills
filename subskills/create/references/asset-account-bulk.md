@@ -1,8 +1,10 @@
 # Asset Account Bulk
 
-API：`POST /api/v1/accounts/accounts/bulk/`
+## API
 
-入口：
+`POST /api/v1/accounts/accounts/bulk/`
+
+## 入口
 
 ```bash
 python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-to-assets ...
@@ -13,7 +15,7 @@ python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-template-
 
 对应 `API.md` 第 15 项。
 
-Payload 规则：
+### Payload 规则
 
 - v1 以 `--payload` 完整 JSON 为主。
 - 常用显式字段可覆盖 payload：`--name`、`--username`、`--secret-type`、`--secret`、`--passphrase`、`--privileged`、`--secret-reset`、`--push-now`、`--on-invalid`、`--is-active`、`--asset`、`--comment`。
@@ -22,7 +24,7 @@ Payload 规则：
 - `secret_type` 可为 `ssh_key`、`password`、`token`、`access_key`、`api_key`。
 - `secret_type=ssh_key` 时可传 `passphrase`。
 
-示例：
+### 示例
 
 ```bash
 python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-to-assets --org-name Default --payload '<json>' --confirm
@@ -32,7 +34,7 @@ python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-to-assets
 
 对应 `API.md` 第 16 项。
 
-Payload 规则：
+### Payload 规则
 
 - v1 以 `--payload` 完整 JSON 为主。
 - 常用显式字段可覆盖 payload：`--template`、`--asset`、`--node`、`--privileged`、`--secret-type`、`--secret-reset`、`--push-now`、`--on-invalid`、`--is-active`。
@@ -41,7 +43,7 @@ Payload 规则：
 - `assets` 支持资产 ID、名称或地址；`nodes` 支持节点 ID、名称或 full_value。
 - `on_invalid` 可为 `skip`、`update`、`error`。
 
-示例：
+### 示例
 
 ```bash
 python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-template-to-assets --org-name Default --secret-type password --payload '<json>' --confirm
@@ -59,5 +61,5 @@ python3 subskills/create/scripts/jms_asset_account_bulk.py add-account-template-
 - `--org-id` 与 `--org-name` 不能同时传。
 - 显式 `--org-id` / `--org-name` 只限定本次命令，不写 `.env`。
 - `--org-name --confirm` 会查询当前 AK/SK 可访问组织；唯一匹配后按该组织执行，但不写 `.env JMS_ORG_ID`。
-- dry-run 不写 `.env`，不 POST，不查重；传 `--org-name` 时只预览组织名。
+- dry-run 不写 `.env`，不 POST；传 `--org-name` 时只预览组织名。
 - 全局组织禁止；不能在 `00000000-0000-0000-0000-000000000000` 下执行。

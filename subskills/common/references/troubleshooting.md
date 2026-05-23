@@ -22,7 +22,8 @@
 | `Asset permission API is unavailable or not yet confirmed ...` | 当前环境未开放权限接口，或权限不足 | 记录为接口待确认，先做替代性只读验证 |
 | `object_does_not_exist` / `404` | ID 错误、组织错误或对象不存在 | 先重新 `list/get/resolve` |
 | `python3: can't open file 'subskills/*/scripts/...': [Errno 2] No such file or directory` | 当前工作目录不在 skill 根目录，或调用方使用了错误的相对路径 | 先执行 `pwd` 确认 cwd；若不在 skill 根目录，先切换到 skill 根目录再重试，或改用仓库相对路径 |
-| “帮我创建/更新/删除/解锁/授权” 被拒绝 | 该问题超出 common 范围 | 查看根级 [路由与安全边界](../../../references/routing-and-safety.md)，再进入对应子 Skill |
+| “帮我创建...” 被 common 拒绝 | 创建请求不属于 common 范围 | 查看根级 [路由与安全边界](../../../references/routing-and-safety.md) 的白名单，再进入 create 子 Skill |
+| “帮我更新/删除/解锁/授权变更” 被拒绝 | 该写操作未开放，或不属于 common 范围 | 查看根级 [路由与安全边界](../../../references/routing-and-safety.md)；白名单外写操作保持阻塞 |
 
 ## 统计误判与执行上下文
 
