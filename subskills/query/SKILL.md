@@ -71,8 +71,10 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 
 ### 模板报告后的数据总结
 
-- 先报告“报告已生成”，再补充文字摘要。
-- 文字摘要必须基于正式入口返回的 `summary`、`records`、校验结果。
+- 使用报告正式流程为 `daily-usage-prepare -> Skill 根据 summary_input 写摘要 JSON -> daily-usage-render`。
+- `risk_login_analysis`、`risk_command_analysis`、`risk_transfer_analysis`、`high_risk_operation_analysis`、`risk_action`、`command_summary`、`command_compliance_analysis`、`file_transfer_summary` 必须由 Skill 基于 `summary_input` 总结填入。
+- 先完成 render 并报告“报告已生成”，再补充文字摘要。
+- 文字摘要必须基于正式入口返回的 `summary_input`、`summary`、`records`、校验结果。
 - 若只是部分榜单，明确说“这是部分榜单，不能替代总量”。
 
 ## 边界
@@ -105,5 +107,6 @@ python3 subskills/query/scripts/jms_permissions.py asset-perm-users --asset-id <
 python3 subskills/query/scripts/jms_audit.py audit-list --audit-type login --days 30 --username example.user
 python3 subskills/query/scripts/jms_inspect.py inspect --capability hot-assets-ranking --days 30 --top 10
 python3 subskills/query/scripts/jms_runtime_query.py reports --report-type account-statistic --days 30
-python3 subskills/query/scripts/jms_report.py daily-usage --date 20260310
+python3 subskills/query/scripts/jms_report.py daily-usage-prepare --date 20260310
+python3 subskills/query/scripts/jms_report.py daily-usage-render --prepared-path reports/prepared/JumpServer-2026-03-10.prepared.json --summary-file /tmp/jms-summary.json
 ```

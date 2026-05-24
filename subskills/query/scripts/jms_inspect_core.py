@@ -1729,13 +1729,18 @@ def session_records(filters: dict[str, Any]) -> dict[str, Any]:
     )
 
 def _is_failed_login(item: dict[str, Any]) -> bool:
+    raw_status = _string_value(_first_field(item, "status")).strip().lower()
+    if raw_status == "0":
+        return True
+    if raw_status == "1":
+        return False
     haystack = " ".join(
         [
             _extract_status(item),
             _string_value(_first_field(item, "reason", "detail", "type")),
         ]
     ).lower()
-    return any(token in haystack for token in ("fail", "failed", "auth_err", "error", "denied", "block"))
+    return any(token in haystack for token in ("fail", "failed", "auth_err", "error", "denied", "block", "失败", "错误", "拒绝", "锁定"))
 
 def _login_records(filters: dict[str, Any]) -> list[dict[str, Any]]:
     payload = _normalize_login_audit_filters(_normalize_time_filters(filters))

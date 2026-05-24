@@ -118,8 +118,8 @@ If the core request is JumpServer overall usage, overview, summary, ranking, or 
 
 | Expression Type | Route |
 |---|---|
-| Usage report, daily report, weekly report, monthly report, usage situation, usage analysis, usage statistics, usage overview | `jms_report.py daily-usage` |
-| What happened on a day, login/session/command/transfer activity on a day, TOP list or ranking for a time range | `jms_report.py daily-usage` |
+| Usage report, daily report, weekly report, monthly report, usage situation, usage analysis, usage statistics, usage overview | `jms_report.py daily-usage-prepare` -> Skill summary -> `jms_report.py daily-usage-render` |
+| What happened on a day, login/session/command/transfer activity on a day, TOP list or ranking for a time range | `jms_report.py daily-usage-prepare` -> Skill summary -> `jms_report.py daily-usage-render` |
 | Login logs, session details, command records, file transfer details, single audit record | `jms_audit.py` |
 | Explicit "do not generate a report / only give conclusions / do not use the template" | May skip the HTML report and return a short analysis |
 

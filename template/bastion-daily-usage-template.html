@@ -1008,7 +1008,7 @@
 
     .risk-analysis-grid {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
     }
 
@@ -1041,6 +1041,10 @@
 
     .risk-analysis-card.transfer::before {
       background: linear-gradient(90deg, #8e6640, #d7a03a);
+    }
+
+    .risk-analysis-card.operation::before {
+      background: linear-gradient(90deg, #6f5a9c, #9f86d9);
     }
 
     .risk-analysis-head {
@@ -1635,6 +1639,10 @@
                   <span class="label">传输风险</span>
                   <span class="value mono">{{file_transfer_total}}</span>
                 </article>
+                <article class="risk-signal-card">
+                  <span class="label">高危操作</span>
+                  <span class="value mono">{{high_risk_operation_total}}</span>
+                </article>
               </div>
             </article>
 
@@ -1658,6 +1666,13 @@
                   <h3>传输风险分析</h3>
                 </div>
                 <p class="risk-analysis-body">{{risk_transfer_analysis}}</p>
+              </article>
+
+              <article class="risk-analysis-card operation">
+                <div class="risk-analysis-head">
+                  <h3>高危操作分析</h3>
+                </div>
+                <p class="risk-analysis-body">{{high_risk_operation_analysis}}</p>
               </article>
             </div>
 
@@ -1684,7 +1699,7 @@
               <article class="summary-card">
                 <div class="lead-metric">
                   <div>
-                    <span class="label">当日登录会话</span>
+                    <span class="label">登录次数</span>
                     <div class="value mono">{{login_total}}</div>
                   </div>
                   <span class="badge success">Login Audit</span>
@@ -1698,15 +1713,15 @@
               </article>
 
               <article class="table-card">
-                <h3>当日登录会话明细 Top 10</h3>
+                <h3>登录明细 Top10</h3>
                 <div class="table-shell">
                   <table class="data-table data-table-login">
                     <thead>
                       <tr>
                         <th>登录用户名</th>
-                        <th>来源城市</th>
-                        <th>来源 IP</th>
-                        <th>状态</th>
+                        <th>登录次数</th>
+                        <th>成功次数</th>
+                        <th>失败次数</th>
                       </tr>
                     </thead>
                     <tbody>

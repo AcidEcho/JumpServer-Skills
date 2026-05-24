@@ -118,8 +118,8 @@ cp .env.example .env
 
 | 表达类型 | 路由 |
 |---|---|
-| 使用报告、日报、周报、月报、使用情况、使用分析、使用统计、使用概览 | `jms_report.py daily-usage` |
-| 某天发生了什么、某天登录/会话/命令/传输情况、某时间段 TOP 或排行 | `jms_report.py daily-usage` |
+| 使用报告、日报、周报、月报、使用情况、使用分析、使用统计、使用概览 | `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render` |
+| 某天发生了什么、某天登录/会话/命令/传输情况、某时间段 TOP 或排行 | `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render` |
 | 登录日志、会话详情、命令记录、文件传输明细、单条审计记录 | `jms_audit.py` |
 | 明确要求“不生成报告 / 只给结论 / 不用模板” | 可跳过 HTML 报告，直接做简短分析 |
 
@@ -133,7 +133,7 @@ cp .env.example .env
 | `本月` | 本月 1 日 `00:00:00` 到当前日期或月末 `23:59:59` |
 | `2026-03-10 到 2026-03-24`、`3月10号到3月24号` | 起始日 `00:00:00` 到结束日 `23:59:59` |
 
-正式入口最终统一使用 `--date`、`--period` 或 `--date-from/--date-to`。报告固定输出到 `reports/JumpServer-YYYY-MM-DD.html`；成功时先回显“报告已生成”，再给出报告路径、文件存在性/大小、模板路径、字段元数据路径、时间范围、组织和 `validation_summary`。简短摘要只能作为补充，不能替代报告产物信息。
+正式入口最终统一使用 `--date`、`--period` 或 `--date-from/--date-to` 进入 prepare，内部归一化为 `date_from` 和 `date_to`。报告分析字段由 Skill 基于 `summary_input` 总结后写入摘要 JSON，再通过 render 生成 `reports/JumpServer-YYYY-MM-DD.html`；成功时先回显“报告已生成”，再给出报告路径、文件存在性/大小、模板路径、字段元数据路径、时间范围、组织和 `validation_summary`。简短摘要只能作为补充，不能替代报告产物信息。
 
 ## 组织选择与阻塞规则
 

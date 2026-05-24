@@ -1,6 +1,6 @@
 interface:
   display_name: "JumpServer Skills"
-  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖资产/账号/用户/组织查询、权限查询、用户有效访问范围、登录/会话/命令/传输审计、治理巡检、访问分析、23 个 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则），以及某天或某时间段的 JumpServer 使用报告。详细写操作白名单与组织限制以 `references/routing-and-safety.md` 为准；report 类请求必须经由 `jms_report.py daily-usage`。"
+  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖资产/账号/用户/组织查询、权限查询、用户有效访问范围、登录/会话/命令/传输审计、治理巡检、访问分析、23 个 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则），以及某天或某时间段的 JumpServer 使用报告。详细写操作白名单与组织限制以 `references/routing-and-safety.md` 为准；report 类请求必须经由 `jms_report.py daily-usage-prepare` 与 `daily-usage-render`。"
   default_prompt: |
     使用 $jumpserver-skills 处理 JumpServer V4.10 请求。
 
@@ -11,7 +11,7 @@ interface:
     - 本 prompt 只保留路由优先级、阻塞红线、统计口径与执行习惯。
 
     ## 路由优先级（高 -> 低）
-    1. 报告 / 使用分析（核心对象是某天 / 某时间段的整体使用数据）-> `jms_report.py daily-usage`。
+    1. 报告 / 使用分析（核心对象是某天 / 某时间段的整体使用数据）-> `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render`。
     2. 配置 / 组织 / 连通性 / 解析 -> `jms_common.py`、`jms_query.py resolve`、`jms_runtime_query.py`。
     3. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号"）-> `jms_access.py user-assets / user-nodes / user-asset-access`。
     4. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
@@ -21,9 +21,10 @@ interface:
 
     ## 报告 / 使用分析的强约束
     - 触发条件：核心是某天或某时间段的整体使用情况、日报/周报/月报、使用统计/概览、"某天发生了什么"，或 "帮我分析下某天堡垒机器的使用情况"、"帮我分析下20260310的堡垒机使用情况" 这类说法（含具体日期或相对日期）。
-    - 必须先把 `昨天 / 20260310 / 3 月 10 号 / 上周 / 本月` 等表达归一化为明确时间窗，再调用 `jms_report.py daily-usage`；不要先输出自由文本摘要。
+    - 必须先把 `昨天 / 20260310 / 3 月 10 号 / 上周 / 本月` 等表达归一化为明确时间窗，再调用 `jms_report.py daily-usage-prepare`；不要先输出自由文本摘要。
+    - `daily-usage-prepare` 返回 `summary_input` 后，必须由 Skill 基于这些结构化数据写 8 个分析字段，再保存摘要 JSON 并调用 `jms_report.py daily-usage-render --prepared-path ... --summary-file ...`。禁止让脚本为这些字段生成兜底文案。
     - 报告生成成功后，必须先回显"报告已生成"，然后顺序回显：报告文件路径、文件大小、模板路径、字段元数据路径、报告日期 / 开始时间 / 结束时间、生效组织、可切换组织、已查询命令存储 ID / 数量、`validation_summary`；中文标签后可以括号补原字段名，例如 `生效组织（effective_org）`、`校验摘要（validation_summary）`。
-    - 未显式传组织时 `daily-usage` 默认全局组织 `00000000-0000-0000-0000-000000000000` 且不写 `.env`；显式传 `--org-id` 或唯一匹配 `--org-name` 时按该组织生成并写 `.env JMS_ORG_ID`。
+    - 未显式传组织时报告 prepare 默认全局组织 `00000000-0000-0000-0000-000000000000` 且不写 `.env`；显式传 `--org-id` 或唯一匹配 `--org-name` 时按该组织生成并写 `.env JMS_ORG_ID`。
     - 跳过模板报告的前提：用户明确说"不要生成报告，直接分析 / 先简单说下 / 只给我结论 / 不用模板"。跳过时仍要把相对时间词固定为明确 `date_from / date_to`；"近一个月" 默认按 recent 30 days，不按自然月，除非用户明确说"上个月 / 3 月整月"。
 
     ## 登录次数 / 审计调查的路由要点

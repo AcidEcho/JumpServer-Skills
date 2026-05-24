@@ -36,20 +36,26 @@
 ## 固定流程
 
 ```text
-config-status --json -> ping -> 按组织优先级处理 -> python3 subskills/query/scripts/jms_report.py daily-usage ... -> 生成后自检 -> 输出 HTML
+config-status --json -> ping -> 按组织优先级处理 -> daily-usage-prepare -> Skill 基于 summary_input 写摘要 JSON -> daily-usage-render -> 生成后自检 -> 输出 HTML
 ```
 
-正式报告入口固定为：
+正式报告入口固定为两步：
 
 ```bash
-python3 subskills/query/scripts/jms_report.py daily-usage \
+python3 subskills/query/scripts/jms_report.py daily-usage-prepare \
   --date 2026-03-10 \
   --org-id 00000000-0000-0000-0000-000000000000
+
+python3 subskills/query/scripts/jms_report.py daily-usage-render \
+  --prepared-path reports/prepared/JumpServer-2026-03-10.prepared.json \
+  --summary-file /tmp/jms-summary.json
 ```
 
 生成的 HTML 会固定写入 skill 根目录下的 `reports/JumpServer-YYYY-MM-DD.html`；兼容参数 `--output` 即使传入也不会改变实际输出路径。
+`daily-usage-render` 只有在最终 HTML 生成成功且运行时校验通过后，才会自动删除本次使用的 prepared JSON 和 Skill summary JSON；失败时保留中间文件用于排查。
 
 不要每次请求都现场写临时拼装逻辑。报告类请求必须优先走正式入口；若正式入口缺失，应先补齐正式入口，再使用它。
+`risk_login_analysis`、`risk_command_analysis`、`risk_transfer_analysis`、`high_risk_operation_analysis`、`risk_action`、`command_summary`、`command_compliance_analysis`、`file_transfer_summary` 必须由 Skill 根据 `summary_input` 总结后写入摘要 JSON，脚本不得生成这些字段的兜底文案。
 
 ## 组织优先级
 
@@ -124,6 +130,13 @@ python3 subskills/query/scripts/jms_report.py daily-usage \
 
 正式入口内部直接复用 Python 模块与 handler，不通过 subprocess 套 CLI JSON。不要手工发明新的数据来源，也不要回退到临时 HTML 拼装逻辑。
 
+### 长时间窗登录 Top 精准性
+
+全局组织或长时间窗报告要求登录 Top 精准时，`daily-usage-prepare` 仍以全量登录日志为准，不使用样本估算。
+当登录时间窗超过 31 天时，prepare 会把登录日志按周分片分页拉完整数据；若单周分片触发 429 限速，会自动把该周降级为按天分片继续拉取。
+全部分片结果会合并去重，再统一聚合登录总量、成功/失败数、Top 用户、Top 来源 IP、失败 Top 和城市统计。
+分片诊断会写入 `summary_input.login.fetch_diagnostics`；若任一分片拉取失败，prepare 直接失败，不生成 prepared 工件。
+
 ## 命令存储规则
 
 如果模板字段涉及命令审计：
@@ -142,7 +155,7 @@ python3 subskills/query/scripts/jms_report.py daily-usage \
 
 - 完整 HTML 报告
 - 明确说明“报告已生成”
-- 正式入口：`python3 subskills/query/scripts/jms_report.py daily-usage ...`
+- 正式入口：`python3 subskills/query/scripts/jms_report.py daily-usage-prepare ...` 和 `daily-usage-render ...`
 - 报告文件路径
 - 文件存在性与大小：`output_exists`、`output_size_bytes`、`output_size_human`
 - 模板路径：`template/bastion-daily-usage-template.html`
@@ -169,8 +182,9 @@ python3 subskills/query/scripts/jms_report.py daily-usage \
 
 ## 模板报告后的文字摘要规则
 
+- 先通过 `daily-usage-prepare` 获取 `summary_input`，由 Skill 写 8 个分析字段，再通过 `daily-usage-render` 生成 HTML。
 - 先报告“报告已生成”，再补充文字摘要；不要跳过报告产物直接只讲结论。
-- 文字摘要必须基于正式入口返回的 `summary`、`records` 或其他结构化结果字段，不基于 HTML 静态内容猜测。
+- 文字摘要必须基于正式入口返回的 `summary_input`、`summary`、`records` 或其他结构化结果字段，不基于 HTML 静态内容猜测。
 - `summary` 是摘要里的权威总量来源；若它能回答问题，优先用它，不要先抓榜单第一名下结论。
 - `top_users`、`top_assets`、ranking 一类榜单若是 Top N / 被截断 / 只返回部分数据，必须明确说明“这是部分榜单，不能替代总量”。
 - 若工具同时返回总量和完整分布，可以在文字摘要前做用户之和、资产之和与总量的交叉验证；若只返回榜单，没有完整分布，则摘要必须保持保守措辞。

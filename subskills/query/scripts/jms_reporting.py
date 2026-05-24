@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 import tempfile
 from typing import Any
 
@@ -21,21 +22,31 @@ except ImportError:  # pragma: no cover
         ZoneInfoNotFoundError = None  # type: ignore[assignment]
 
 from jms_audit_core import (
+    LOGIN_LOGS_PATH,
+    OPERATE_LOGS_PATH,
+    _apply_common_filters,
     _extract_account,
     _extract_asset,
     _extract_datetime,
     _extract_direction,
     _extract_duration,
     _extract_protocol,
+    _extract_resource_type,
     _extract_source_ip,
     _extract_status,
     _extract_user,
     _fetch_command_records,
     _fetch_file_transfer_records,
+    _fetch_list,
     _fetch_session_records,
     _first_field,
     _is_failed_login,
+    _list_request_filters,
     _login_records,
+    _normalize_login_audit_filters,
+    _normalize_operate_audit_filters,
+    _normalize_time_filters,
+    _org_id_from_filters,
     _string_value,
     parse_date_value,
     parse_datetime_value,
@@ -47,6 +58,7 @@ from jumpserver_common.jms_runtime import (
     CLIError,
     GLOBAL_ORG_ID,
     build_cli_guidance_payload,
+    create_client,
     list_accessible_orgs,
     parse_bool,
     persist_selected_org,
@@ -56,6 +68,7 @@ from jumpserver_common.jms_runtime import (
 SKILL_DIR = Path(__file__).resolve().parents[3]
 REPORT_TEMPLATE_PATH = SKILL_DIR / "template" / "bastion-daily-usage-template.html"
 REPORT_METADATA_PATH = SKILL_DIR / "subskills" / "query" / "references" / "metadata" / "daily_usage_report_template_fields.json"
+REPORT_PREPARED_DIR = SKILL_DIR / "reports" / "prepared"
 PLACEHOLDER_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 DATE_COMPACT_RE = re.compile(r"^(?P<year>\d{4})(?P<month>\d{2})(?P<day>\d{2})$")
 DATE_CN_RE = re.compile(r"^(?:(?P<year>\d{4})\s*年)?\s*(?P<month>\d{1,2})\s*月\s*(?P<day>\d{1,2})\s*[日号]$")
@@ -70,6 +83,16 @@ else:
 TEXT_CONTRACT = "text"
 TBODY_ROWS_CONTRACT = "tbody_rows"
 REQUIRED_KEY_FIELDS = ("login_total", "login_failed", "session_total", "risk_event_total")
+SKILL_SUMMARY_FIELDS = (
+    "risk_login_analysis",
+    "risk_command_analysis",
+    "risk_transfer_analysis",
+    "high_risk_operation_analysis",
+    "risk_action",
+    "command_summary",
+    "command_compliance_analysis",
+    "file_transfer_summary",
+)
 REPORT_RUNTIME_REQUIRED_FIELDS = (
     "output_path",
     "output_exists",
@@ -99,6 +122,10 @@ LOGIN_LOCKED_REASON_TEXT = "账号已锁定，请联系管理员解锁或 5 分�
 LOGIN_INVALID_CREDENTIALS_TEXT = "用户名或密码错误"
 REPORT_ORG_SELECTION_REASON_CODE = "report_organization_not_accessible"
 REPORT_DATE_ARGUMENT_REASON_CODE = "invalid_report_date_arguments"
+REPORT_LOGIN_SLICE_FETCH_REASON_CODE = "login_time_slice_fetch_failed"
+LOGIN_DIRECT_WINDOW_DAYS = 31
+LOGIN_TIME_SLICE_DAYS = 7
+LOGIN_THROTTLE_RETRY_DELAYS = (2.0, 4.0, 8.0, 16.0, 30.0)
 
 
 def _local_now() -> datetime:
@@ -121,6 +148,11 @@ def load_report_template() -> str:
 def _default_report_output_path(report_date: str) -> Path:
     date_token = str(report_date or "").strip() or _local_now().date().isoformat()
     return SKILL_DIR / "reports" / ("JumpServer-%s.html" % date_token)
+
+
+def _default_prepared_output_path(report_date: str) -> Path:
+    date_token = str(report_date or "").strip() or _local_now().date().isoformat()
+    return REPORT_PREPARED_DIR / ("JumpServer-%s.prepared.json" % date_token)
 
 
 def _format_output_size_human(size_bytes: int) -> str:
@@ -549,22 +581,31 @@ def _top_summary(counter: Counter[str], *, limit: int = 3) -> str:
     return " / ".join(rows) if rows else EMPTY_TEXT
 
 
-def _top_records_summary(rows: list[dict[str, Any]], *, keys: tuple[str, ...], count_key: str = "count", limit: int = 3) -> str:
-    final = []
-    for item in rows[:limit]:
-        name = ""
-        for key in keys:
-            name = str(item.get(key) or "").strip()
-            if name:
-                break
-        final.append("%s(%s)" % (name or "unknown", item.get(count_key) or 0))
-    return " / ".join(final) if final else EMPTY_TEXT
+def _risk_top_summary(counter: Counter[str], *, limit: int = 3) -> str:
+    rows = []
+    for key, count in counter.most_common(limit):
+        label = str(key or "").strip() or "unknown"
+        rows.append("%s(%s次)" % (label, count))
+    return "、".join(rows) if rows else EMPTY_TEXT
 
 
-def _risk_level_label(risk_event_total: int, login_failed: int, high_risk_command_total: int, file_transfer_total: int) -> str:
-    if risk_event_total >= 10 or high_risk_command_total >= 5 or login_failed >= 10:
+def _int_value(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _risk_level_label(
+    risk_event_total: int,
+    login_failed: int,
+    high_risk_command_total: int,
+    file_transfer_total: int,
+    high_risk_operation_total: int = 0,
+) -> str:
+    if risk_event_total >= 10 or high_risk_command_total >= 5 or login_failed >= 10 or high_risk_operation_total >= 5:
         return "高风险"
-    if risk_event_total >= 3 or high_risk_command_total > 0 or login_failed >= 3 or file_transfer_total >= 20:
+    if risk_event_total >= 3 or high_risk_command_total > 0 or high_risk_operation_total > 0 or login_failed >= 3 or file_transfer_total >= 20:
         return "中风险"
     return "低风险"
 
@@ -580,16 +621,26 @@ def _row(cells: list[Any]) -> str:
 def _render_login_rows(records: list[dict[str, Any]]) -> str:
     if not records:
         return _empty_row(4)
+    user_stats: dict[str, dict[str, int]] = {}
+    for item in records:
+        user = _extract_user(item) or "unknown"
+        stats = user_stats.setdefault(user, {"total": 0, "success": 0, "failed": 0})
+        stats["total"] += 1
+        if _is_failed_login(item):
+            stats["failed"] += 1
+        else:
+            stats["success"] += 1
+    sorted_rows = sorted(user_stats.items(), key=lambda item: (-item[1]["total"], item[0]))
     return "".join(
         _row(
             [
-                _extract_user(item),
-                _extract_city(item),
-                _extract_source_ip(item),
-                _extract_status(item) or ("失败" if _is_failed_login(item) else "成功"),
+                user,
+                str(stats["total"]),
+                str(stats["success"]),
+                str(stats["failed"]),
             ]
         )
-        for item in records[:10]
+        for user, stats in sorted_rows[:10]
     )
 
 
@@ -677,6 +728,11 @@ def _normalize_direction(value: str) -> str:
     return text or "unknown"
 
 
+def _is_delete_operation(item: dict[str, Any]) -> bool:
+    text = str(_extract_direction(item) or "").strip().lower()
+    return text in {"delete", "删除"}
+
+
 def _get_path_value(payload: dict[str, Any], path: str) -> Any:
     current: Any = payload
     for part in path.split("."):
@@ -706,8 +762,292 @@ def _normalize_license_source() -> dict[str, Any]:
     return dict(record or {})
 
 
+def _login_fetch_window(filters: dict[str, Any]) -> tuple[datetime, datetime] | None:
+    date_from = filters.get("date_from")
+    date_to = filters.get("date_to")
+    if date_from in {None, ""} or date_to in {None, ""}:
+        return None
+    start = _parse_datetime_expr(str(date_from), end_of_day=False)
+    end = _parse_datetime_expr(str(date_to), end_of_day=True)
+    return start, end
+
+
+def _format_login_slice_datetime(value: datetime) -> str:
+    dt = value.astimezone(SHANGHAI_TZ) if SHANGHAI_TZ and value.tzinfo else value
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _login_time_slices(date_from: datetime, date_to: datetime, *, days: int = LOGIN_TIME_SLICE_DAYS) -> list[dict[str, Any]]:
+    slices = []
+    cursor = date_from
+    while cursor <= date_to:
+        next_start = cursor + timedelta(days=days)
+        if next_start <= date_to:
+            slices.append(
+                {
+                    "date_from": cursor,
+                    "date_to": next_start,
+                    "exclusive_to": next_start,
+                }
+            )
+            cursor = next_start
+        else:
+            slices.append(
+                {
+                    "date_from": cursor,
+                    "date_to": date_to,
+                    "exclusive_to": None,
+                }
+            )
+            break
+    return slices
+
+
+def _login_time_slices_exclusive(date_from: datetime, exclusive_to: datetime, *, days: int) -> list[dict[str, Any]]:
+    slices = []
+    cursor = date_from
+    while cursor < exclusive_to:
+        next_start = min(cursor + timedelta(days=days), exclusive_to)
+        slices.append(
+            {
+                "date_from": cursor,
+                "date_to": next_start,
+                "exclusive_to": next_start,
+            }
+        )
+        cursor = next_start
+    return slices
+
+
+def _login_record_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    record_id = _string_value(_first_field(item, "id", "pk", "uuid"))
+    if record_id:
+        return ("id", record_id)
+    timestamp = _extract_datetime(item)
+    reason = _string_value(_first_field(item, "reason", "detail", "type"))
+    return (
+        "fallback",
+        timestamp.isoformat() if timestamp else "",
+        _extract_user(item),
+        _extract_source_ip(item),
+        _extract_status(item),
+        reason,
+    )
+
+
+def _dedupe_login_records(records: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
+    seen: set[tuple[Any, ...]] = set()
+    deduped = []
+    duplicate_count = 0
+    for item in records:
+        key = _login_record_key(item)
+        if key in seen:
+            duplicate_count += 1
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped, duplicate_count
+
+
+def _should_retry_login_slice_daily(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "429" in text or "throttled" in text or "限速" in text
+
+
+def _login_page_with_backoff(client: Any, params: dict[str, Any]) -> Any:
+    retry_count = 0
+    while True:
+        try:
+            return client.get(LOGIN_LOGS_PATH, params=params)
+        except Exception as exc:  # noqa: BLE001
+            if not _should_retry_login_slice_daily(exc) or retry_count >= len(LOGIN_THROTTLE_RETRY_DELAYS):
+                raise
+            time.sleep(LOGIN_THROTTLE_RETRY_DELAYS[retry_count])
+            retry_count += 1
+
+
+def _login_records_paginated_with_backoff(filters: dict[str, Any]) -> list[dict[str, Any]]:
+    payload = _normalize_login_audit_filters(_normalize_time_filters(filters))
+    request_params = _list_request_filters(LOGIN_LOGS_PATH, payload)
+    page_limit = int(request_params.get("limit") or 200)
+    offset = int(request_params.get("offset") or 0)
+    request_params["limit"] = page_limit
+    client = create_client(org_id=_org_id_from_filters(filters))
+    records: list[dict[str, Any]] = []
+    seen_offsets: set[int] = set()
+
+    while offset not in seen_offsets:
+        seen_offsets.add(offset)
+        page_params = dict(request_params)
+        page_params["offset"] = offset
+        page = _login_page_with_backoff(client, page_params)
+        total_count = None
+        if isinstance(page, dict) and isinstance(page.get("results"), list):
+            page_records = [item for item in page.get("results") or [] if isinstance(item, dict)]
+            try:
+                total_count = int(page.get("count"))
+            except (TypeError, ValueError):
+                total_count = None
+        elif isinstance(page, list):
+            page_records = [item for item in page if isinstance(item, dict)]
+        else:
+            break
+        records.extend(page_records)
+        if not page_records:
+            break
+        if total_count is not None and offset + len(page_records) >= total_count:
+            break
+        if len(page_records) < page_limit:
+            break
+        offset += page_limit
+    return _apply_common_filters(records, payload)
+
+
+def _fetch_login_slice_records(
+    filters: dict[str, Any],
+    item: dict[str, Any],
+    *,
+    retry_on_throttle: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    slice_filters = dict(filters)
+    slice_filters.pop("_date_from", None)
+    slice_filters.pop("_date_to", None)
+    slice_filters["date_from"] = _format_login_slice_datetime(item["date_from"])
+    slice_filters["date_to"] = _format_login_slice_datetime(item["date_to"])
+    retry_count = 0
+    while True:
+        try:
+            if retry_on_throttle:
+                slice_records = _login_records_paginated_with_backoff(slice_filters)
+            else:
+                slice_records = list(_login_records(slice_filters))
+            break
+        except Exception as exc:  # noqa: BLE001
+            if not retry_on_throttle or not _should_retry_login_slice_daily(exc) or retry_count >= len(LOGIN_THROTTLE_RETRY_DELAYS):
+                raise
+            time.sleep(LOGIN_THROTTLE_RETRY_DELAYS[retry_count])
+            retry_count += 1
+    exclusive_to = item.get("exclusive_to")
+    if exclusive_to is not None:
+        slice_records = [
+            record
+            for record in slice_records
+            if _extract_datetime(record) is None or _extract_datetime(record) < exclusive_to
+        ]
+    return slice_records, {
+        "date_from": slice_filters["date_from"],
+        "date_to": slice_filters["date_to"],
+        "record_count": len(slice_records),
+        "retry_count": retry_count,
+    }
+
+
+def _raise_login_slice_error(exc: Exception, diagnostics: dict[str, Any]) -> None:
+    raise CLIError(
+        "登录日志分片拉取失败。",
+        payload=build_cli_guidance_payload(
+            REPORT_LOGIN_SLICE_FETCH_REASON_CODE,
+            user_message="登录日志分片拉取失败，未生成 prepared 工件。",
+            action_hint="请检查 JumpServer API 连通性或缩小时间窗后重试。",
+            slice_date_from=diagnostics["date_from"],
+            slice_date_to=diagnostics["date_to"],
+            original_error=str(exc),
+            original_payload=getattr(exc, "payload", None),
+        ),
+    ) from exc
+
+
+def _fetch_login_records_time_sliced(filters: dict[str, Any], date_from: datetime, date_to: datetime) -> dict[str, Any]:
+    raw_records: list[dict[str, Any]] = []
+    slice_diagnostics = []
+    daily_fallback_count = 0
+    for item in _login_time_slices(date_from, date_to):
+        try:
+            slice_records, diagnostics = _fetch_login_slice_records(filters, item)
+        except Exception as exc:  # noqa: BLE001
+            diagnostics = {
+                "date_from": _format_login_slice_datetime(item["date_from"]),
+                "date_to": _format_login_slice_datetime(item["date_to"]),
+            }
+            if not _should_retry_login_slice_daily(exc):
+                _raise_login_slice_error(exc, diagnostics)
+            if item.get("exclusive_to") is not None:
+                daily_items = _login_time_slices_exclusive(item["date_from"], item["exclusive_to"], days=1)
+            else:
+                daily_items = _login_time_slices(item["date_from"], item["date_to"], days=1)
+            for daily_item in daily_items:
+                try:
+                    daily_records, daily_diagnostics = _fetch_login_slice_records(
+                        filters,
+                        daily_item,
+                        retry_on_throttle=True,
+                    )
+                except Exception as daily_exc:  # noqa: BLE001
+                    daily_error_diagnostics = {
+                        "date_from": _format_login_slice_datetime(daily_item["date_from"]),
+                        "date_to": _format_login_slice_datetime(daily_item["date_to"]),
+                    }
+                    _raise_login_slice_error(daily_exc, daily_error_diagnostics)
+                daily_diagnostics["granularity"] = "day"
+                daily_diagnostics["fallback_from"] = diagnostics
+                raw_records.extend(daily_records)
+                slice_diagnostics.append(daily_diagnostics)
+                daily_fallback_count += 1
+            continue
+        diagnostics["granularity"] = "week"
+        raw_records.extend(slice_records)
+        slice_diagnostics.append(diagnostics)
+    records, duplicate_count = _dedupe_login_records(raw_records)
+    return {
+        "records": records,
+        "fetch_diagnostics": {
+            "fetch_strategy": "time_sliced",
+            "slice_count": len(slice_diagnostics),
+            "slice_granularity": "week/day" if daily_fallback_count else "week",
+            "daily_fallback_count": daily_fallback_count,
+            "raw_record_count": len(raw_records),
+            "deduplicated_count": duplicate_count,
+            "slices": slice_diagnostics,
+        },
+    }
+
+
+def _fetch_login_records_for_report(filters: dict[str, Any]) -> dict[str, Any]:
+    window = _login_fetch_window(filters)
+    if window is None:
+        records = list(_login_records(filters))
+        return {
+            "records": records,
+            "fetch_diagnostics": {
+                "fetch_strategy": "direct",
+                "slice_count": 1,
+                "slice_granularity": None,
+                "raw_record_count": len(records),
+                "deduplicated_count": 0,
+                "slices": [],
+            },
+        }
+    date_from, date_to = window
+    if date_to - date_from <= timedelta(days=LOGIN_DIRECT_WINDOW_DAYS):
+        records = list(_login_records(filters))
+        return {
+            "records": records,
+            "fetch_diagnostics": {
+                "fetch_strategy": "direct",
+                "slice_count": 1,
+                "slice_granularity": None,
+                "raw_record_count": len(records),
+                "deduplicated_count": 0,
+                "slices": [],
+            },
+        }
+    return _fetch_login_records_time_sliced(filters, date_from, date_to)
+
+
 def _normalize_login_source(filters: dict[str, Any]) -> dict[str, Any]:
-    records = list(_login_records(filters))
+    fetch_payload = _fetch_login_records_for_report(filters)
+    records = list(fetch_payload.get("records") or [])
+    fetch_diagnostics = dict(fetch_payload.get("fetch_diagnostics") or {})
     records.sort(key=lambda item: _extract_datetime(item) or datetime.min.replace(tzinfo=_local_now().tzinfo), reverse=True)
     failed_records = [item for item in records if _is_failed_login(item)]
     success_records = [item for item in records if not _is_failed_login(item)]
@@ -722,10 +1062,16 @@ def _normalize_login_source(filters: dict[str, Any]) -> dict[str, Any]:
         "login_failed": len(failed_records),
         "unique_login_city_count": len(city_counter),
         "top_login_ip_summary": _top_summary(ip_counter),
+        "risk_top_login_ip_summary": _risk_top_summary(ip_counter),
         "rows_html": _render_login_rows(records),
         "login_failed_rows": _render_login_failed_rows(failed_records, common_ips=common_ips),
         "records": records,
         "failed_records": failed_records,
+        "fetch_diagnostics": fetch_diagnostics,
+        "fetch_strategy": fetch_diagnostics.get("fetch_strategy"),
+        "slice_count": fetch_diagnostics.get("slice_count"),
+        "slice_granularity": fetch_diagnostics.get("slice_granularity"),
+        "deduplicated_count": fetch_diagnostics.get("deduplicated_count"),
     }
 
 
@@ -836,6 +1182,21 @@ def _normalize_file_transfer_source(filters: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_high_risk_operation_source(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_operate_audit_filters({**filters, "action": "delete"})
+    common_filters = {key: value for key, value in payload.items() if key != "action"}
+    records = [item for item in _apply_common_filters(list(_fetch_list(OPERATE_LOGS_PATH, payload)), common_filters) if _is_delete_operation(item)]
+    records.sort(key=lambda item: _extract_datetime(item) or datetime.min.replace(tzinfo=_local_now().tzinfo), reverse=True)
+    user_counter = Counter(_extract_user(item) or "unknown" for item in records)
+    resource_counter = Counter(_extract_resource_type(item) or "unknown" for item in records)
+    return {
+        "high_risk_operation_total": len(records),
+        "high_risk_operation_users": _risk_top_summary(user_counter),
+        "high_risk_operation_resource_types": _risk_top_summary(resource_counter),
+        "records": records,
+    }
+
+
 def _normalize_suspicious_source(filters: dict[str, Any]) -> dict[str, Any]:
     payload = _unwrap_single_result_layers(suspicious_operation_summary(filters))
     summary = payload.get("summary") if isinstance(payload, dict) else {}
@@ -898,6 +1259,8 @@ def _collect_source_payloads(
             payload = _normalize_high_risk_command_source(fetch("capability:command-record-query"))
         elif source_key == "capability:file-transfer-log-query":
             payload = _normalize_file_transfer_source(source_filters)
+        elif source_key == "entrypoint:python3 subskills/query/scripts/jms_audit.py audit-list --audit-type operate --action delete":
+            payload = _normalize_high_risk_operation_source(source_filters)
         elif source_key == "capability:file-transfer-heavy-ranking":
             file_payload = fetch("capability:file-transfer-log-query")
             payload = {
@@ -939,7 +1302,7 @@ def _resolve_simple_field(field_spec: dict[str, Any], source_payloads: dict[str,
             if value not in {None, ""}:
                 return value
         elif field_name and field_name in payload and payload.get(field_name) not in {None, ""}:
-            return payload.get(field_name)
+                return payload.get(field_name)
     return None
 
 
@@ -947,15 +1310,23 @@ def _derive_fields(
     resolved: dict[str, Any],
     source_payloads: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    command_payload = source_payloads.get("capability:command-record-query", {})
-    high_risk_payload = source_payloads.get("capability:high-risk-command-audit", {})
+    resolved = dict(resolved)
+    risk_event_total = (
+        int(resolved.get("login_failed") or 0)
+        + int(resolved.get("high_risk_command_total") or 0)
+        + int(resolved.get("file_transfer_total") or 0)
+        + int(resolved.get("high_risk_operation_total") or 0)
+    )
+    resolved["risk_event_total"] = risk_event_total
     risk_level = _risk_level_label(
-        int(resolved.get("risk_event_total") or 0),
+        risk_event_total,
         int(resolved.get("login_failed") or 0),
         int(resolved.get("high_risk_command_total") or 0),
         int(resolved.get("file_transfer_total") or 0),
+        int(resolved.get("high_risk_operation_total") or 0),
     )
     derived = {
+        "risk_event_total": risk_event_total,
         "daily_summary": (
             "统计时段内共发生 %s 次登录，失败 %s 次；产生 %s 个会话、%s 条命令记录、%s 次文件传输，识别到 %s 项风险/异常事件。"
             % (
@@ -967,65 +1338,10 @@ def _derive_fields(
                 resolved.get("risk_event_total") or 0,
             )
         ),
-        "command_summary": (
-            "本时段共采集 %s 条命令记录，其中高危命令 %s 条；主要操作用户为 %s，主要操作资产为 %s。"
-            % (
-                resolved.get("command_total") or 0,
-                resolved.get("high_risk_command_total") or 0,
-                resolved.get("top_command_users") or EMPTY_TEXT,
-                resolved.get("top_command_assets") or EMPTY_TEXT,
-            )
-        ),
-        "command_compliance_analysis": (
-            "若高危命令占比持续升高，应优先复核高危命令明细、确认执行账号与资产范围，并结合操作目的评估是否需要收紧规范。"
-            if int(resolved.get("high_risk_command_total") or 0) > 0
-            else "本时段未发现高危命令集中爆发迹象，命令执行整体较为平稳。"
-        ),
         "risk_level": risk_level,
         "risk_summary": (
-            "综合登录失败、高危命令和文件传输情况，本时段风险等级判定为%s；风险/异常事件总数为 %s。"
+            "综合登录失败、高危命令、文件传输和高危操作情况，本时段风险等级判定为%s；风险/异常事件总数为 %s。"
             % (risk_level, resolved.get("risk_event_total") or 0)
-        ),
-        "risk_login_analysis": (
-            "失败登录 %s 次，主要来源 IP 为 %s，覆盖来源城市 %s 个。"
-            % (
-                resolved.get("login_failed") or 0,
-                resolved.get("top_login_ip_summary") or EMPTY_TEXT,
-                resolved.get("unique_login_city_count") or 0,
-            )
-        ),
-        "risk_command_analysis": (
-            "高危命令 %s 条，主要集中在用户 %s 与资产 %s。"
-            % (
-                resolved.get("high_risk_command_total") or 0,
-                resolved.get("top_command_users") or EMPTY_TEXT,
-                resolved.get("top_command_assets") or EMPTY_TEXT,
-            )
-        ),
-        "risk_transfer_analysis": (
-            "文件传输共 %s 次，其中上传 %s 次、下载 %s 次；主要涉及用户 %s，主要涉及资产 %s。"
-            % (
-                resolved.get("file_transfer_total") or 0,
-                resolved.get("file_upload_total") or 0,
-                resolved.get("file_download_total") or 0,
-                resolved.get("file_transfer_users") or EMPTY_TEXT,
-                resolved.get("file_transfer_assets") or EMPTY_TEXT,
-            )
-        ),
-        "risk_action": (
-            "建议优先复核失败登录来源与高危命令明细，确认是否存在异常来源 IP、共享账号滥用或高风险批量操作；必要时结合文件传输记录做进一步取证。"
-            if risk_level in {"高风险", "中风险"}
-            else "建议继续保持现有审计频率，关注失败登录与高危命令的波动趋势。"
-        ),
-        "file_transfer_summary": (
-            "本时段文件传输共 %s 次，其中上传 %s 次、下载 %s 次；主要传输用户为 %s，主要传输资产为 %s。"
-            % (
-                resolved.get("file_transfer_total") or 0,
-                resolved.get("file_upload_total") or 0,
-                resolved.get("file_download_total") or 0,
-                resolved.get("file_transfer_users") or EMPTY_TEXT,
-                resolved.get("file_transfer_assets") or EMPTY_TEXT,
-            )
         ),
     }
     return derived
@@ -1296,9 +1612,171 @@ def _validate_report_output(
     }
 
 
-def build_daily_usage_report(
+def _counter_items(counter: Counter[str], *, limit: int = 3) -> list[dict[str, Any]]:
+    return [
+        {"name": str(key or "").strip() or "unknown", "count": int(count or 0)}
+        for key, count in counter.most_common(limit)
+    ]
+
+
+def _top_items_from_records(records: list[dict[str, Any]], extractor, *, limit: int = 3) -> list[dict[str, Any]]:
+    counter = Counter()
+    for item in records:
+        value = str(extractor(item) or "").strip()
+        if value:
+            counter[value] += 1
+    return _counter_items(counter, limit=limit)
+
+
+def _sample_login_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "time": _format_datetime(_extract_datetime(item)),
+        "user": _extract_user(item),
+        "source_ip": _extract_source_ip(item),
+        "city": _extract_city(item),
+        "status": _extract_status(item) or ("失败" if _is_failed_login(item) else "成功"),
+        "failure_reason": _display_login_failure_reason(item),
+    }
+
+
+def _sample_command_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "time": _format_datetime(_extract_datetime(item)),
+        "user": _extract_user(item),
+        "asset": _extract_asset(item),
+        "account": _extract_account(item),
+        "command": _extract_command_text(item),
+        "risk_level": _string_value(_first_field(item, "risk_level_display", "risk_level.value", "risk_level")),
+    }
+
+
+def _sample_file_transfer_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "time": _format_datetime(_extract_datetime(item)),
+        "user": _extract_user(item),
+        "asset": _extract_asset(item),
+        "account": _extract_account(item),
+        "direction": _normalize_direction(_extract_direction(item)),
+        "file": _string_value(_first_field(item, "filename", "file_name", "name", "path", "filepath", "file")),
+    }
+
+
+def _sample_operation_record(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "time": _format_datetime(_extract_datetime(item)),
+        "user": _extract_user(item),
+        "action": _extract_direction(item),
+        "resource_type": _extract_resource_type(item),
+        "resource": _string_value(_first_field(item, "resource", "resource_name", "object", "object_name", "instance")),
+    }
+
+
+def _build_summary_input(
     *,
-    output_path: str | None = None,
+    context: dict[str, Any],
+    resolved_values: dict[str, Any],
+    derived_values: dict[str, Any],
+    source_payloads: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    login_payload = source_payloads.get("entrypoint:python3 subskills/query/scripts/jms_audit.py audit-list --audit-type login", {})
+    command_payload = source_payloads.get("capability:command-record-query", {})
+    high_risk_payload = source_payloads.get("capability:high-risk-command-audit", {})
+    file_payload = source_payloads.get("capability:file-transfer-log-query", {})
+    operation_payload = source_payloads.get("entrypoint:python3 subskills/query/scripts/jms_audit.py audit-list --audit-type operate --action delete", {})
+
+    login_records = list(login_payload.get("records") or [])
+    failed_login_records = list(login_payload.get("failed_records") or [])
+    command_records = list(command_payload.get("records") or [])
+    high_risk_command_records = list(high_risk_payload.get("records") or [])
+    file_transfer_records = list(file_payload.get("records") or [])
+    operation_records = list(operation_payload.get("records") or [])
+
+    upload_total = _int_value(resolved_values.get("file_upload_total"))
+    download_total = _int_value(resolved_values.get("file_download_total"))
+    file_direction = "mixed"
+    if upload_total > 0 and download_total <= 0:
+        file_direction = "upload_only"
+    elif download_total > 0 and upload_total <= 0:
+        file_direction = "download_only"
+    elif upload_total == download_total and upload_total > 0:
+        file_direction = "balanced"
+    elif upload_total > download_total:
+        file_direction = "upload_heavy"
+    elif download_total > upload_total:
+        file_direction = "download_heavy"
+
+    return {
+        "report": {
+            "report_date": context["runtime_context"]["report_date"],
+            "date_from": context["runtime_context"]["date_from"],
+            "date_to": context["runtime_context"]["date_to"],
+            "effective_org": context["org_context"]["effective_org"],
+            "risk_level": derived_values.get("risk_level"),
+            "risk_event_total": _int_value(derived_values.get("risk_event_total")),
+        },
+        "risk": {
+            "risk_level": derived_values.get("risk_level"),
+            "risk_event_total": _int_value(derived_values.get("risk_event_total")),
+            "login_failed": _int_value(resolved_values.get("login_failed")),
+            "high_risk_command_total": _int_value(resolved_values.get("high_risk_command_total")),
+            "file_transfer_total": _int_value(resolved_values.get("file_transfer_total")),
+            "high_risk_operation_total": _int_value(resolved_values.get("high_risk_operation_total")),
+        },
+        "login": {
+            "total": _int_value(resolved_values.get("login_total")),
+            "success": _int_value(resolved_values.get("login_success")),
+            "failed": _int_value(resolved_values.get("login_failed")),
+            "unique_city_count": _int_value(resolved_values.get("unique_login_city_count")),
+            "fetch_strategy": login_payload.get("fetch_strategy"),
+            "slice_count": _int_value(login_payload.get("slice_count")),
+            "slice_granularity": login_payload.get("slice_granularity"),
+            "raw_record_count": _int_value((login_payload.get("fetch_diagnostics") or {}).get("raw_record_count")),
+            "deduplicated_count": _int_value(login_payload.get("deduplicated_count")),
+            "fetch_diagnostics": login_payload.get("fetch_diagnostics") or {},
+            "top_source_ips_summary": login_payload.get("top_login_ip_summary"),
+            "failed_top_source_ips": _top_items_from_records(failed_login_records, _extract_source_ip),
+            "failed_top_users": _top_items_from_records(failed_login_records, _extract_user),
+            "failed_top_cities": _top_items_from_records(failed_login_records, _extract_city),
+            "failed_samples": [_sample_login_record(item) for item in failed_login_records[:10]],
+        },
+        "command": {
+            "total": _int_value(resolved_values.get("command_total")),
+            "high_risk_total": _int_value(resolved_values.get("high_risk_command_total")),
+            "high_risk_ratio": _percent(
+                _int_value(resolved_values.get("high_risk_command_total")),
+                _int_value(resolved_values.get("command_total")),
+            ),
+            "queried_command_storage_ids": command_payload.get("queried_command_storage_ids") or [],
+            "queried_command_storage_count": _int_value(command_payload.get("queried_command_storage_count")),
+            "top_users_all_commands": _top_items_from_records(command_records, _extract_user),
+            "top_assets_all_commands": _top_items_from_records(command_records, _extract_asset),
+            "top_users_high_risk": _top_items_from_records(high_risk_command_records, _extract_user),
+            "top_assets_high_risk": _top_items_from_records(high_risk_command_records, _extract_asset),
+            "high_risk_samples": [_sample_command_record(item) for item in high_risk_command_records[:10]],
+        },
+        "file_transfer": {
+            "total": _int_value(resolved_values.get("file_transfer_total")),
+            "upload_total": upload_total,
+            "download_total": download_total,
+            "direction_profile": file_direction,
+            "top_users": _top_items_from_records(file_transfer_records, _extract_user),
+            "top_assets": _top_items_from_records(file_transfer_records, _extract_asset),
+            "samples": [_sample_file_transfer_record(item) for item in file_transfer_records[:10]],
+        },
+        "high_risk_operation": {
+            "total": _int_value(resolved_values.get("high_risk_operation_total")),
+            "action": "delete",
+            "top_users_summary": operation_payload.get("high_risk_operation_users"),
+            "top_resource_types_summary": operation_payload.get("high_risk_operation_resource_types"),
+            "top_users": _top_items_from_records(operation_records, _extract_user),
+            "top_resource_types": _top_items_from_records(operation_records, _extract_resource_type),
+            "samples": [_sample_operation_record(item) for item in operation_records[:10]],
+        },
+    }
+
+
+def _build_daily_usage_state(
+    *,
     date_expr: str | None = None,
     period_expr: str | None = None,
     date_from_expr: str | None = None,
@@ -1338,11 +1816,127 @@ def build_daily_usage_report(
         if not isinstance(item, dict):
             continue
         field_name = str(item.get("field") or "").strip()
-        if not field_name or item.get("source_kind") == "derived":
+        if not field_name or item.get("source_kind") in {"derived", "skill_summary"}:
             continue
         resolved_values[field_name] = _resolve_simple_field(item, source_payloads)
 
     derived_values = _derive_fields(resolved_values, source_payloads)
+    summary_input = _build_summary_input(
+        context=context,
+        resolved_values=resolved_values,
+        derived_values=derived_values,
+        source_payloads=source_payloads,
+    )
+    return {
+        "schema_version": 1,
+        "context": context,
+        "resolved_values": resolved_values,
+        "derived_values": derived_values,
+        "source_payloads": source_payloads,
+        "summary_input": summary_input,
+    }
+
+
+def _normalize_skill_summary_fields(summary_payload: dict[str, Any]) -> dict[str, str]:
+    payload = summary_payload.get("summary_fields") if isinstance(summary_payload.get("summary_fields"), dict) else summary_payload
+    missing = []
+    invalid = []
+    normalized: dict[str, str] = {}
+    for field in SKILL_SUMMARY_FIELDS:
+        if field not in payload:
+            missing.append(field)
+            continue
+        value = payload.get(field)
+        if not isinstance(value, str) or not value.strip():
+            invalid.append(field)
+            continue
+        normalized[field] = value.strip()
+    if missing or invalid:
+        raise CLIError(
+            "Skill summary fields are required before rendering report.",
+            payload=build_cli_guidance_payload(
+                "missing_skill_summary_fields",
+                user_message="报告分析字段必须由 Skill 根据 summary_input 总结后提供。",
+                action_hint="请先运行 daily-usage-prepare，基于 summary_input 写摘要 JSON，再运行 daily-usage-render。",
+                missing_fields=missing,
+                invalid_fields=invalid,
+                required_fields=list(SKILL_SUMMARY_FIELDS),
+            ),
+        )
+    return normalized
+
+
+def _load_json_object(path: str | Path) -> dict[str, Any]:
+    target = Path(path)
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise CLIError("Unable to read JSON file: %s" % target, payload={"error": str(exc), "path": str(target)})
+    except json.JSONDecodeError as exc:
+        raise CLIError("Invalid JSON file: %s" % target, payload={"error": str(exc), "path": str(target)})
+    if not isinstance(payload, dict):
+        raise CLIError("JSON file must contain an object: %s" % target, payload={"path": str(target)})
+    return payload
+
+
+def _cleanup_report_intermediate_files(*paths: str | Path) -> dict[str, Any]:
+    deleted_paths = []
+    failed_paths = []
+    skipped_paths = []
+    seen: set[str] = set()
+    for path in paths:
+        target = Path(path)
+        path_text = str(target)
+        if path_text in seen:
+            continue
+        seen.add(path_text)
+        if not target.exists():
+            skipped_paths.append(path_text)
+            continue
+        try:
+            target.unlink()
+        except OSError as exc:
+            failed_paths.append({"path": path_text, "error": str(exc)})
+        else:
+            deleted_paths.append(path_text)
+    return {
+        "enabled": True,
+        "deleted_paths": deleted_paths,
+        "failed_paths": failed_paths,
+        "skipped_paths": skipped_paths,
+    }
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=str(path.parent), suffix=".json") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=2, default=str)
+        handle.write("\n")
+        temp_name = handle.name
+    os.replace(temp_name, path)
+
+
+def _render_daily_usage_report_from_state(
+    state: dict[str, Any],
+    skill_summaries: dict[str, str],
+) -> dict[str, Any]:
+    metadata = load_report_metadata()
+    template_html = load_report_template()
+    contract = validate_report_contract(metadata=metadata, template_html=template_html)
+    if not contract.get("contract_passed"):
+        raise CLIError(
+            "Report contract validation failed before generation.",
+            payload=contract,
+        )
+
+    context = dict(state.get("context") or {})
+    runtime_context = context.get("runtime_context") or {}
+    org_context = context.get("org_context") or {}
+    source_payloads = dict(state.get("source_payloads") or {})
+    resolved_values = dict(state.get("resolved_values") or {})
+    derived_values = dict(state.get("derived_values") or {})
+    derived_values.update(_normalize_skill_summary_fields(skill_summaries))
+
     rendered_fields: dict[str, str] = {}
     for item in metadata.get("fields", []):
         if not isinstance(item, dict):
@@ -1371,7 +1965,7 @@ def build_daily_usage_report(
             payload=validation,
         )
 
-    output = _default_report_output_path(context["runtime_context"]["report_date"])
+    output = _default_report_output_path(runtime_context.get("report_date"))
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=str(output.parent), suffix=".html") as handle:
         handle.write(rendered_html)
@@ -1383,14 +1977,15 @@ def build_daily_usage_report(
         "output_path": str(output),
         "template_path": str(REPORT_TEMPLATE_PATH.relative_to(SKILL_DIR)),
         "metadata_path": str(REPORT_METADATA_PATH.relative_to(SKILL_DIR)),
-        "effective_org": context["org_context"]["effective_org"],
-        "switchable_orgs": context["org_context"]["switchable_orgs"],
+        "effective_org": org_context.get("effective_org") or {},
+        "switchable_orgs": org_context.get("switchable_orgs") or [],
         "queried_command_storage_ids": command_source.get("queried_command_storage_ids") or [],
         "queried_command_storage_count": int(command_source.get("queried_command_storage_count") or 0),
-        "report_date": context["runtime_context"]["report_date"],
-        "date_from": context["runtime_context"]["date_from"],
-        "date_to": context["runtime_context"]["date_to"],
+        "report_date": runtime_context.get("report_date"),
+        "date_from": runtime_context.get("date_from"),
+        "date_to": runtime_context.get("date_to"),
         "validation_summary": validation,
+        "skill_summary_fields": list(SKILL_SUMMARY_FIELDS),
     }
     result.update(_collect_report_artifact_metadata(output))
     runtime_contract = validate_report_runtime_result(result)
@@ -1402,3 +1997,90 @@ def build_daily_usage_report(
             payload=runtime_contract,
         )
     return result
+
+
+def build_daily_usage_prepare(
+    *,
+    date_expr: str | None = None,
+    period_expr: str | None = None,
+    date_from_expr: str | None = None,
+    date_to_expr: str | None = None,
+    org_id: str | None = None,
+    org_name: str | None = None,
+    command_storage_id: str | None = None,
+) -> dict[str, Any]:
+    state = _build_daily_usage_state(
+        date_expr=date_expr,
+        period_expr=period_expr,
+        date_from_expr=date_from_expr,
+        date_to_expr=date_to_expr,
+        org_id=org_id,
+        org_name=org_name,
+        command_storage_id=command_storage_id,
+    )
+    context = state["context"]
+    runtime_context = context["runtime_context"]
+    command_source = state["source_payloads"].get("capability:command-record-query", {})
+    login_source = state["source_payloads"].get("entrypoint:python3 subskills/query/scripts/jms_audit.py audit-list --audit-type login", {})
+    prepared_path = _default_prepared_output_path(runtime_context["report_date"])
+    _write_json_atomic(prepared_path, state)
+    return {
+        "prepared_path": str(prepared_path),
+        "template_path": str(REPORT_TEMPLATE_PATH.relative_to(SKILL_DIR)),
+        "metadata_path": str(REPORT_METADATA_PATH.relative_to(SKILL_DIR)),
+        "effective_org": context["org_context"]["effective_org"],
+        "switchable_orgs": context["org_context"]["switchable_orgs"],
+        "queried_command_storage_ids": command_source.get("queried_command_storage_ids") or [],
+        "queried_command_storage_count": int(command_source.get("queried_command_storage_count") or 0),
+        "report_date": runtime_context["report_date"],
+        "date_from": runtime_context["date_from"],
+        "date_to": runtime_context["date_to"],
+        "summary_input": state["summary_input"],
+        "login_fetch_diagnostics": login_source.get("fetch_diagnostics") or {},
+        "required_summary_fields": list(SKILL_SUMMARY_FIELDS),
+        "output_generated": False,
+    }
+
+
+def render_prepared_daily_usage_report(*, prepared_path: str, summary_file: str) -> dict[str, Any]:
+    state = _load_json_object(prepared_path)
+    summary_payload = _load_json_object(summary_file)
+    skill_summaries = _normalize_skill_summary_fields(summary_payload)
+    result = _render_daily_usage_report_from_state(state, skill_summaries)
+    result["intermediate_cleanup"] = _cleanup_report_intermediate_files(prepared_path, summary_file)
+    return result
+
+
+def build_daily_usage_report(
+    *,
+    output_path: str | None = None,
+    date_expr: str | None = None,
+    period_expr: str | None = None,
+    date_from_expr: str | None = None,
+    date_to_expr: str | None = None,
+    org_id: str | None = None,
+    org_name: str | None = None,
+    command_storage_id: str | None = None,
+    skill_summaries: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _ = output_path
+    if skill_summaries is None:
+        raise CLIError(
+            "daily-usage requires Skill-generated summary fields.",
+            payload=build_cli_guidance_payload(
+                "missing_skill_summary_fields",
+                user_message="报告分析字段不再由脚本生成。请先运行 `daily-usage-prepare`，由 Skill 根据 `summary_input` 写摘要，再运行 `daily-usage-render`。",
+                action_hint="使用 `python3 subskills/query/scripts/jms_report.py daily-usage-prepare ...` 获取 summary_input。",
+                required_fields=list(SKILL_SUMMARY_FIELDS),
+            ),
+        )
+    state = _build_daily_usage_state(
+        date_expr=date_expr,
+        period_expr=period_expr,
+        date_from_expr=date_from_expr,
+        date_to_expr=date_to_expr,
+        org_id=org_id,
+        org_name=org_name,
+        command_storage_id=command_storage_id,
+    )
+    return _render_daily_usage_report_from_state(state, _normalize_skill_summary_fields(skill_summaries))
