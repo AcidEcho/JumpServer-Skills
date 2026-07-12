@@ -3,7 +3,7 @@
 create 子 skill 已支持以下正式入口。通用规则：
 
 - 无 `--confirm` 只 dry-run 预览，不 POST。
-- 追加 `--confirm` 后才解析引用、执行查重并创建。
+- 追加 `--confirm` 后才解析必要引用并创建；对象唯一性由 JumpServer 服务端原子约束，Skill 不执行客户端预查重。
 - dry-run、成功和错误输出都会脱敏密文字段或密文语义字段。
 - 组织限制以根级 [路由与安全边界](../../../references/routing-and-safety.md) 为准。
 

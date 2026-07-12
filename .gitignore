@@ -1,4 +1,7 @@
 .env
+.env.lock
+.env.recovery-*.bak
+.env.recovery-*.stage
 .DS_Store
 
 __pycache__/
@@ -13,5 +16,3 @@ __pycache__/
 
 tests/
 reports/
-
-API.md

@@ -116,7 +116,7 @@
 - `某天登录情况` / `某天会话情况` / `某天命令情况` -> 报告/使用分析
 - `某天登录日志` / `某天会话明细` / `某天命令记录` -> 审计调查
 - `某时间段谁登录最多` / `谁用得最多` / `哪些资产最活跃` -> 报告/使用分析
-- `某个或多个指定用户近一个月登录多少次` -> 审计调查；优先 `audit-list --audit-type login`，不要走 `daily-usage` 或 `recent-active-users-ranking`
+- `某个或多个指定用户近一个月登录多少次` -> 审计调查；优先 `audit-list --audit-type login`，不要走使用报告流程或 `recent-active-users-ranking`
 - 命名用户登录次数回答先说明时间范围、组织和统计口径，再按用户逐行列出各自的 `summary.total`；不要按可见 `records` 人工计数，也不要先把多人的次数合并成一个总数，除非用户明确要求汇总
 - `查最近 30 条登录日志` / `看某条会话详情` / `导出某天命令明细` -> 审计调查
 - `某某用户在 Default 组织下有哪些资产` -> 用户有效访问范围；优先在单次命令内用 `--org-id` / `--org-name` 限定目标组织，再查 `user-assets`
@@ -182,7 +182,7 @@
 
 模板报告请求：
 
-- 必须优先使用 `python3 subskills/query/scripts/jms_report.py daily-usage ...`。
+- 必须先使用 `python3 subskills/query/scripts/jms_report.py daily-usage-prepare ...`，由 Skill 基于 `summary_input` 写摘要 JSON，再使用 `daily-usage-render`。
 - 允许由正式报告入口按字段元数据串联多个正式入口。
 - 不得超出 `subskills/query/references/metadata/daily_usage_report_template_fields.json` 里声明的来源。
 - 不允许每次请求现场写临时构建逻辑。

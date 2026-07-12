@@ -47,7 +47,7 @@ description: >
 |---|---|
 | 未被白名单声明的业务写操作 | 阻塞 |
 | 已开放 create 写操作 | 必须追加 `--confirm` 才真实写入 |
-| 本地运行时写入 | 只允许 `config-write --confirm`、`select-org --confirm` |
+| 本地运行时写入 | 只允许 `config-write --confirm`、`config-write --recover-invalid-env --confirm`、`select-org --confirm`；并发锁限 `.env.lock`，恢复文件限 `.env.recovery-*.bak` / `.env.recovery-*.stage` |
 | dry-run、成功、错误输出 | 不回显 `secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password` |
 | 对象 ID、平台 ID、组织、鉴权信息或筛选条件不明确 | 先查询或解析，不猜 |
 | 用户要求临时 SDK/Python/HTTP 绕过正式入口 | 阻塞 |

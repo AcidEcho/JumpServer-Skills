@@ -75,8 +75,12 @@ def _config_write(args: argparse.Namespace) -> dict[str, Any]:
         usage_examples=[
             "python3 subskills/common/scripts/jms_common.py config-write --payload '{\"JMS_API_URL\": \"https://jump.example.com\"}' --confirm",
         ],
+        include_raw_value=False,
     )
-    return write_local_env_config(payload)
+    return write_local_env_config(
+        payload,
+        recover_invalid=bool(getattr(args, "recover_invalid_env", False)),
+    )
 
 
 def _ping(_: argparse.Namespace) -> dict[str, Any]:
@@ -260,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     config_write = subparsers.add_parser("config-write", help="写入本地 .env 配置。", formatter_class=CLIHelpFormatter)
     config_write.add_argument("--payload", required=True)
+    config_write.add_argument(
+        "--recover-invalid-env",
+        action="store_true",
+        help="仅恢复现存且无法解析的 .env；要求完整 payload，并先生成 0600 原始字节备份。",
+    )
     config_write.add_argument("--confirm", action="store_true")
     config_write.set_defaults(func=_config_write)
 

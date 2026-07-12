@@ -24,6 +24,7 @@ from jumpserver_common.jms_runtime import (
     org_id_from_context,
     org_context_output,
     parse_bool,
+    parse_strict_bool,
 )
 
 PERMISSION_PATH = "/api/v1/perms/asset-permissions/"
@@ -2048,6 +2049,8 @@ def platform_usage_distribution(filters: dict[str, Any]) -> dict[str, Any]:
 
 def _build_asset_rows(filters: dict[str, Any]) -> list[dict[str, Any]]:
     payload = dict(filters)
+    if payload.get("is_active") not in {None, ""}:
+        payload["is_active"] = parse_strict_bool(payload["is_active"], field_name="is_active")
     assets = _fetch_list("/api/v1/assets/assets/", payload)
     assets = _apply_common_filters(assets, _normalize_time_filters({}, default_days=3650))
     rows = []
@@ -2066,7 +2069,7 @@ def _build_asset_rows(filters: dict[str, Any]) -> list[dict[str, Any]]:
         if payload.get("address") and not _match_text(row["address"], payload["address"]):
             continue
         if payload.get("is_active") not in {None, ""}:
-            wanted = parse_bool(payload["is_active"])
+            wanted = payload["is_active"]
             if bool(row["is_active"]) != wanted:
                 continue
         rows.append(row)
@@ -2193,6 +2196,11 @@ def account_list(filters: dict[str, Any]) -> dict[str, Any]:
     )
 
 def _build_account_rows(payload: dict[str, Any], accounts: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    payload = dict(payload)
+    if payload.get("privileged") not in {None, ""}:
+        payload["privileged"] = parse_strict_bool(payload["privileged"], field_name="privileged")
+    if payload.get("is_active") not in {None, ""}:
+        payload["is_active"] = parse_strict_bool(payload["is_active"], field_name="is_active")
     accounts = list(accounts or _fetch_list("/api/v1/accounts/accounts/", _account_inventory_filters(payload)))
     rows = []
     for item in accounts:
@@ -2211,19 +2219,21 @@ def _build_account_rows(payload: dict[str, Any], accounts: list[dict[str, Any]] 
             continue
         if payload.get("asset") and not _match_text(row["asset"], payload["asset"]):
             continue
-        if payload.get("privileged") not in {None, ""} and row["privileged"] != parse_bool(payload["privileged"]):
+        if payload.get("privileged") not in {None, ""} and row["privileged"] != payload["privileged"]:
             continue
-        if payload.get("is_active") not in {None, ""} and bool(row["is_active"]) != parse_bool(payload["is_active"]):
+        if payload.get("is_active") not in {None, ""} and bool(row["is_active"]) != payload["is_active"]:
             continue
         rows.append(row)
     return rows
 
 def long_time_unused_accounts(filters: dict[str, Any]) -> dict[str, Any]:
     payload = dict(filters)
+    if payload.get("privileged") not in {None, ""}:
+        payload["privileged"] = parse_strict_bool(payload["privileged"], field_name="privileged")
     days = int(payload.get("days") or 90)
     rows = _account_activity_rows(_normalize_time_filters({**payload, "days": days}, default_days=days))
     if payload.get("privileged") not in {None, ""}:
-        wanted = parse_bool(payload["privileged"])
+        wanted = payload["privileged"]
         rows = [item for item in rows if bool(item.get("privileged")) == wanted]
     unused = [item for item in rows if item["usage_count"] == 0]
     never_seen_count = sum(1 for item in unused if item["never_seen"])

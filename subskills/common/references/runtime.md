@@ -62,6 +62,17 @@ python3 subskills/common/scripts/jms_common.py config-status --json
 - `missing_fields` 表示缺失的必需字段。
 - `invalid_fields` 表示字段已提供，但格式或取值非法；当前至少会校验 `JMS_API_URL` 与 `JMS_TIMEOUT`。
 - CLI 失败返回通常包含 `user_message`、`action_hint`、`suggested_commands`；优先按 `suggested_commands` 重试。
+- `.env` 固定使用 UTF-8；读取兼容 UTF-8 BOM，正式写回统一使用无 BOM UTF-8。
+- `config-write --confirm` 使用版本化的对称 codec，引号、反斜杠和 Unicode 值可精确往返；旧格式在下次成功写入时迁移，并保留旧 reader 当前解析到的值。
+- 所有配置都是单行标量；CR/LF/NUL 会被拒绝并返回 `invalid_env_value`，错误结果不会回显原值。
+- 非 UTF-8 或损坏字节返回 `invalid_env_encoding`，不自动猜测 GBK 或系统编码。
+- 所有内部配置写入共用 `0600` 的 `.env.lock`；写入先完成完整编码，再通过同目录临时文件原子替换。编码或写盘失败时保留原 `.env`。
+- 已被旧 codec 改坏的特殊字符凭据无法可靠反推原值，需要重新输入完整的新配置。
+- 现存 `.env` 返回 `invalid_env_encoding`、`invalid_env_format` 或读取期 `invalid_env_value` 时，可执行 `config-write --payload '<完整-json>' --recover-invalid-env --confirm`。正常文件或缺失文件会返回 `env_recovery_not_required`，符号链接和非普通文件会被拒绝。
+- 恢复 payload 不读取旧值，也不借用 shell 环境补齐；必须显式提供 `JMS_API_URL` 和至少一套完整认证，未知字段、缺失字段或非法字段会在备份前阻塞。
+- 恢复写入前按原始字节生成同目录 `.env.recovery-*.bak`，权限为 `0600`；返回包含 `backup_file_path` 和 `recovery_reason_code`。备份包含旧凭据，不会自动删除。
+- 恢复提交会先把当前文件原子移入 `.env.recovery-*.stage` 并核对原始字节，再以“不覆盖已存在路径”的方式安装新文件；正常成功会删除 stage。若检测到并发修改，返回 `env_recovery_conflict`，保留并通过 `staged_file_path` 指明未能安全归位的文件。
+- 移动旧文件前会真实预检同目录硬链接能力；exFAT、部分 SMB 等不支持时返回 `env_recovery_hardlink_unsupported`，原 `.env` 不移动。
 
 ### 4. 环境完整性
 
@@ -105,6 +116,7 @@ python3 subskills/common/scripts/jms_common.py ping
 |---|---|
 | `python3 subskills/common/scripts/jms_common.py config-status --json` | 查看当前本地配置状态 |
 | `python3 subskills/common/scripts/jms_common.py config-write --payload '<json>' --confirm` | 生成或覆盖本地 `.env` |
+| `python3 subskills/common/scripts/jms_common.py config-write --payload '<完整-json>' --recover-invalid-env --confirm` | 备份并替换现存且无法解析的 `.env` |
 | `python3 subskills/common/scripts/jms_common.py select-org --org-id <org-id> --confirm` | 按组织 ID 写入 `.env JMS_ORG_ID` |
 | `python3 subskills/common/scripts/jms_common.py select-org --org-name <org-name>` | 按组织名称预览组织，不写回 `.env` |
 | `python3 subskills/common/scripts/jms_common.py ping` | 连通性检查 |

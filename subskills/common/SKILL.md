@@ -29,7 +29,7 @@ common 子 Skill 只负责配置、预检、组织选择、连通性和端点验
 | 命令 | 作用 | 写入 |
 |---|---|---|
 | `config-status` | 查看配置和非密摘要 | 否 |
-| `config-write` | 写 `.env` 配置 | 仅 `--confirm` |
+| `config-write` | 写 `.env` 配置；`--recover-invalid-env` 可备份并恢复损坏文件 | 仅 `--confirm` |
 | `ping` | 验证认证和连通性 | 否 |
 | `select-org` | 选择当前组织 | 仅 `--confirm` |
 | `endpoint-inventory` | 查看端点清单 | 否 |
@@ -39,7 +39,7 @@ common 子 Skill 只负责配置、预检、组织选择、连通性和端点验
 
 | 允许 | 禁止 |
 |---|---|
-| `config-write --confirm` 写本地 `.env` | 写 JumpServer 业务对象 |
+| `config-write --confirm` 写本地 `.env` 和 `.env.lock`；恢复时写 `.env.recovery-*.bak` / `.env.recovery-*.stage` | 写 JumpServer 业务对象 |
 | `select-org --confirm` 写 `.env JMS_ORG_ID` | 创建、更新、删除业务数据 |
 
 ## 示例
@@ -56,3 +56,4 @@ python3 subskills/common/scripts/jms_common.py endpoint-verify --path /api/v1/se
 - 已返回 `reason_code`、`user_message`、`action_hint` 或明确结果。
 - 多组织且无法自动确定时，返回 `candidate_orgs` 后阻塞。
 - 写 `.env` 前必须看到 `--confirm`。
+- `--recover-invalid-env --confirm` 只处理无法解析的普通 `.env`，且要求完整新配置。

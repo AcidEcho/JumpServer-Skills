@@ -51,8 +51,8 @@ python3 subskills/query/scripts/jms_report.py daily-usage-render \
   --summary-file /tmp/jms-summary.json
 ```
 
-生成的 HTML 会固定写入 skill 根目录下的 `reports/JumpServer-YYYY-MM-DD.html`；兼容参数 `--output` 即使传入也不会改变实际输出路径。
-`daily-usage-render` 只有在最终 HTML 生成成功且运行时校验通过后，才会自动删除本次使用的 prepared JSON 和 Skill summary JSON；失败时保留中间文件用于排查。
+生成的 HTML 会固定写入 skill 根目录下的 `reports/JumpServer-YYYY-MM-DD.html`。
+`daily-usage-render` 只有在最终 HTML 生成成功且运行时校验通过后，才会自动删除 `reports/prepared/` 下由正式入口生成的 prepared JSON；Skill summary JSON 默认保留。显式追加 `--cleanup-intermediates` 时，只清理临时目录中名为 `jms-summary*.json` 的摘要文件；失败时保留全部中间文件用于排查。
 
 不要每次请求都现场写临时拼装逻辑。报告类请求必须优先走正式入口；若正式入口缺失，应先补齐正式入口，再使用它。
 `risk_login_analysis`、`risk_command_analysis`、`risk_transfer_analysis`、`high_risk_operation_analysis`、`risk_action`、`command_summary`、`command_compliance_analysis`、`file_transfer_summary` 必须由 Skill 根据 `summary_input` 总结后写入摘要 JSON，脚本不得生成这些字段的兜底文案。

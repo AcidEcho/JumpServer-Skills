@@ -24,7 +24,7 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 | 审计/会话/命令/作业 | `python3 subskills/query/scripts/jms_audit.py ...` | `audit-list`, `audit-get`, `recent-audit`, `terminal-sessions`, `job-list`, `command-storage-hint`, `audit-analyze`, `capabilities` |
 | 巡检/治理/排行 | `python3 subskills/query/scripts/jms_inspect.py ...` | `inspect`, `capabilities` |
 | 只读运行时数据 | `python3 subskills/query/scripts/jms_runtime_query.py ...` | `settings-category`, `license-detail`, `tickets`, `command-storages`, `replay-storages`, `terminals`, `reports`, `account-automations`, `resolve-platform` |
-| HTML 使用报告 | `python3 subskills/query/scripts/jms_report.py ...` | `daily-usage`, `contract-check` |
+| HTML 使用报告 | `python3 subskills/query/scripts/jms_report.py ...` | `daily-usage-prepare`, `daily-usage-render`, `contract-check` |
 
 ## Rules
 
@@ -43,7 +43,7 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 
 | 用户问法 | 入口规则 |
 |---|---|
-| 命名用户在某时间窗内“登录多少次 / 成功登录多少次 / 失败登录多少次” | 不要走 `daily-usage`、`recent-active-users-ranking` 或 Top 榜单 |
+| 命名用户在某时间窗内“登录多少次 / 成功登录多少次 / 失败登录多少次” | 不要走使用报告流程、`recent-active-users-ranking` 或 Top 榜单 |
 | 单个或多个命名用户登录次数 | 优先用 `jms_audit.py audit-list --audit-type login` |
 | 返回结果 | 按每个用户的 `summary.total` 回答，再逐个用户列出结果 |
 

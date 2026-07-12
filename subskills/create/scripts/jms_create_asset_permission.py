@@ -28,7 +28,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
-    parse_bool,
+    parse_strict_bool,
     parse_json_arg,
     preview_create_org_context,
     raise_create_global_org_error,
@@ -297,7 +297,7 @@ def _build_asset_permission_payload(args: argparse.Namespace) -> dict[str, Any]:
     if getattr(args, "action", None):
         payload["actions"] = _normalize_actions(args.action)
     if has_cli_value(args.is_active):
-        payload["is_active"] = parse_bool(args.is_active)
+        payload["is_active"] = parse_strict_bool(args.is_active, field_name="is_active")
     if has_cli_value(args.date_start):
         payload["date_start"] = args.date_start
     if has_cli_value(args.date_expired):
@@ -327,7 +327,7 @@ def _build_asset_permission_payload(args: argparse.Namespace) -> dict[str, Any]:
     else:
         payload["actions"] = list(DEFAULT_ACTIONS)
     if "is_active" in payload:
-        payload["is_active"] = parse_bool(payload.get("is_active"))
+        payload["is_active"] = parse_strict_bool(payload.get("is_active"), field_name="is_active")
 
     return {
         key: value

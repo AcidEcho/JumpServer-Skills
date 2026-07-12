@@ -16,7 +16,6 @@ import argparse
 
 from jms_reporting import (
     build_daily_usage_prepare,
-    build_daily_usage_report,
     render_prepared_daily_usage_report,
     validate_report_contract,
 )
@@ -35,19 +34,6 @@ DAILY_USAGE_EXAMPLES = [
 ]
 
 
-def _daily_usage(args: argparse.Namespace):
-    return build_daily_usage_report(
-        output_path=args.output,
-        date_expr=args.date,
-        period_expr=args.period,
-        date_from_expr=args.date_from,
-        date_to_expr=args.date_to,
-        org_id=args.org_id,
-        org_name=args.org_name,
-        command_storage_id=args.command_storage_id,
-    )
-
-
 def _daily_usage_prepare(args: argparse.Namespace):
     return build_daily_usage_prepare(
         date_expr=args.date,
@@ -64,6 +50,7 @@ def _daily_usage_render(args: argparse.Namespace):
     return render_prepared_daily_usage_report(
         prepared_path=args.prepared_path,
         summary_file=args.summary_file,
+        cleanup_intermediates=args.cleanup_intermediates,
     )
 
 
@@ -94,21 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    daily_usage = subparsers.add_parser(
-        "daily-usage",
-        help="生成某天或某时间段的使用报告。",
-        description="生成 JumpServer 日使用报告；时间参数必须三选一：`--date`、`--period`、或 `--date-from + --date-to`。",
-        epilog="Examples:\n  " + "\n  ".join(DAILY_USAGE_EXAMPLES),
-        formatter_class=CLIHelpFormatter,
-    )
-    daily_usage.add_argument("--output", help="deprecated compatibility flag; actual reports are always written to reports/JumpServer-YYYY-MM-DD.html")
-    _add_time_org_arguments(daily_usage)
-    daily_usage.set_defaults(func=_daily_usage)
-
     daily_usage_prepare = subparsers.add_parser(
         "daily-usage-prepare",
         help="取数并输出给 Skill 总结使用的 summary_input。",
-        description="准备 JumpServer 使用报告数据；不生成最终 HTML。",
+        description="准备 JumpServer 使用报告数据；不生成最终 HTML。时间参数必须三选一：`--date`、`--period`、或 `--date-from + --date-to`。",
         epilog="Examples:\n  " + "\n  ".join(DAILY_USAGE_EXAMPLES[:2]),
         formatter_class=CLIHelpFormatter,
     )
@@ -123,6 +99,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daily_usage_render.add_argument("--prepared-path", required=True, help="daily-usage-prepare 输出的 prepared_path。")
     daily_usage_render.add_argument("--summary-file", required=True, help="Skill 根据 summary_input 写出的摘要 JSON。")
+    daily_usage_render.add_argument(
+        "--cleanup-intermediates",
+        action="store_true",
+        help="成功渲染后清理受控的 prepared 文件和临时 jms-summary*.json；默认保留。",
+    )
     daily_usage_render.set_defaults(func=_daily_usage_render)
 
     contract_check = subparsers.add_parser(
@@ -139,8 +120,8 @@ def main() -> int:
     reject_deprecated_pagination_cli_args(
         sys.argv[1:],
         script_name="jms_report.py",
-        deprecated_commands={"daily-usage", "daily-usage-prepare"},
-        usage_examples_by_command={"daily-usage": DAILY_USAGE_EXAMPLES},
+        deprecated_commands={"daily-usage-prepare"},
+        usage_examples_by_command={"daily-usage-prepare": DAILY_USAGE_EXAMPLES[:2]},
     )
     parser = build_parser()
     args = parser.parse_args()

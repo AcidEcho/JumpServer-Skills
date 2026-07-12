@@ -23,7 +23,7 @@
 
 | 写操作 | 正式入口 | 要求 |
 |---|---|---|
-| 本地配置写入 | `jms_common.py config-write --confirm` | 只写本地 `.env` |
+| 本地配置写入 | `jms_common.py config-write --confirm`；损坏恢复追加 `--recover-invalid-env` | 只写 `.env` / `.env.lock`；恢复额外使用 `.env.recovery-*.bak` 和 `.env.recovery-*.stage` |
 | 当前组织切换 | `jms_common.py select-org --confirm` | 只写 `.env JMS_ORG_ID` |
 | 创建用户 | `jms_create_user.py create-user --confirm` | 密文字段或密文语义字段脱敏；唯一性冲突由服务端校验返回 |
 | 创建用户组 | `jms_create_user_group.py create-user-group --confirm` | 成员只接受用户 ID；唯一性冲突由服务端校验返回 |

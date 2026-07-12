@@ -309,12 +309,12 @@ def _normalize_time_window(
             "报告时间参数不完整或互相冲突。",
             payload=build_cli_guidance_payload(
                 REPORT_DATE_ARGUMENT_REASON_CODE,
-                user_message="`daily-usage` 只能三选一：`--date`、`--period`、或 `--date-from + --date-to`。",
+                user_message="`daily-usage-prepare` 只能三选一：`--date`、`--period`、或 `--date-from + --date-to`。",
                 action_hint="请只保留一种时间写法后重试。",
                 suggested_commands=[
-                    "python3 subskills/query/scripts/jms_report.py daily-usage --date 20260310",
-                    "python3 subskills/query/scripts/jms_report.py daily-usage --period 上周",
-                    "python3 subskills/query/scripts/jms_report.py daily-usage --date-from '2026-03-10 00:00:00' --date-to '2026-03-24 23:59:59'",
+                    "python3 subskills/query/scripts/jms_report.py daily-usage-prepare --date 20260310",
+                    "python3 subskills/query/scripts/jms_report.py daily-usage-prepare --period 上周",
+                    "python3 subskills/query/scripts/jms_report.py daily-usage-prepare --date-from '2026-03-10 00:00:00' --date-to '2026-03-24 23:59:59'",
                 ],
             ),
         )
@@ -328,7 +328,7 @@ def _normalize_time_window(
                     user_message="显式时间范围必须同时提供 `--date-from` 和 `--date-to`。",
                     action_hint="请把开始时间和结束时间成对传入。",
                     suggested_commands=[
-                        "python3 subskills/query/scripts/jms_report.py daily-usage --date-from '2026-03-10 00:00:00' --date-to '2026-03-24 23:59:59'",
+                        "python3 subskills/query/scripts/jms_report.py daily-usage-prepare --date-from '2026-03-10 00:00:00' --date-to '2026-03-24 23:59:59'",
                     ],
                 ),
             )
@@ -1879,17 +1879,65 @@ def _load_json_object(path: str | Path) -> dict[str, Any]:
     return payload
 
 
-def _cleanup_report_intermediate_files(*paths: str | Path) -> dict[str, Any]:
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
+
+
+def _managed_summary_roots() -> list[Path]:
+    roots = [Path(tempfile.gettempdir())]
+    conventional_tmp = Path("/tmp")
+    if conventional_tmp not in roots:
+        roots.append(conventional_tmp)
+    return roots
+
+
+def _cleanup_report_intermediate_files(
+    prepared_path: str | Path,
+    summary_file: str | Path,
+    *,
+    cleanup_summary: bool = False,
+) -> dict[str, Any]:
     deleted_paths = []
     failed_paths = []
     skipped_paths = []
+    blocked_paths = []
+    prepared_target = Path(prepared_path)
+    summary_target = Path(summary_file)
+    prepared_allowed = (
+        not REPORT_PREPARED_DIR.is_symlink()
+        and not prepared_target.is_symlink()
+        and re.fullmatch(r"JumpServer-\d{4}-\d{2}-\d{2}\.prepared\.json", prepared_target.name) is not None
+        and _path_is_within(prepared_target, REPORT_PREPARED_DIR)
+    )
+    summary_allowed = (
+        cleanup_summary
+        and not summary_target.is_symlink()
+        and summary_target.name.startswith("jms-summary")
+        and summary_target.suffix == ".json"
+        and any(_path_is_within(summary_target, root) for root in _managed_summary_roots())
+    )
+    path_specs = [
+        (prepared_target, prepared_allowed, True),
+        (summary_target, summary_allowed, cleanup_summary),
+    ]
+
     seen: set[str] = set()
-    for path in paths:
-        target = Path(path)
+    for target, allowed, requested in path_specs:
         path_text = str(target)
-        if path_text in seen:
+        identity = str(target.resolve(strict=False))
+        if identity in seen:
             continue
-        seen.add(path_text)
+        seen.add(identity)
+        if not requested:
+            skipped_paths.append(path_text)
+            continue
+        if not allowed:
+            blocked_paths.append(path_text)
+            continue
         if not target.exists():
             skipped_paths.append(path_text)
             continue
@@ -1901,9 +1949,11 @@ def _cleanup_report_intermediate_files(*paths: str | Path) -> dict[str, Any]:
             deleted_paths.append(path_text)
     return {
         "enabled": True,
+        "summary_cleanup_enabled": cleanup_summary,
         "deleted_paths": deleted_paths,
         "failed_paths": failed_paths,
         "skipped_paths": skipped_paths,
+        "blocked_paths": blocked_paths,
     }
 
 
@@ -2042,45 +2092,19 @@ def build_daily_usage_prepare(
     }
 
 
-def render_prepared_daily_usage_report(*, prepared_path: str, summary_file: str) -> dict[str, Any]:
+def render_prepared_daily_usage_report(
+    *,
+    prepared_path: str,
+    summary_file: str,
+    cleanup_intermediates: bool = False,
+) -> dict[str, Any]:
     state = _load_json_object(prepared_path)
     summary_payload = _load_json_object(summary_file)
     skill_summaries = _normalize_skill_summary_fields(summary_payload)
     result = _render_daily_usage_report_from_state(state, skill_summaries)
-    result["intermediate_cleanup"] = _cleanup_report_intermediate_files(prepared_path, summary_file)
-    return result
-
-
-def build_daily_usage_report(
-    *,
-    output_path: str | None = None,
-    date_expr: str | None = None,
-    period_expr: str | None = None,
-    date_from_expr: str | None = None,
-    date_to_expr: str | None = None,
-    org_id: str | None = None,
-    org_name: str | None = None,
-    command_storage_id: str | None = None,
-    skill_summaries: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    _ = output_path
-    if skill_summaries is None:
-        raise CLIError(
-            "daily-usage requires Skill-generated summary fields.",
-            payload=build_cli_guidance_payload(
-                "missing_skill_summary_fields",
-                user_message="报告分析字段不再由脚本生成。请先运行 `daily-usage-prepare`，由 Skill 根据 `summary_input` 写摘要，再运行 `daily-usage-render`。",
-                action_hint="使用 `python3 subskills/query/scripts/jms_report.py daily-usage-prepare ...` 获取 summary_input。",
-                required_fields=list(SKILL_SUMMARY_FIELDS),
-            ),
-        )
-    state = _build_daily_usage_state(
-        date_expr=date_expr,
-        period_expr=period_expr,
-        date_from_expr=date_from_expr,
-        date_to_expr=date_to_expr,
-        org_id=org_id,
-        org_name=org_name,
-        command_storage_id=command_storage_id,
+    result["intermediate_cleanup"] = _cleanup_report_intermediate_files(
+        prepared_path,
+        summary_file,
+        cleanup_summary=cleanup_intermediates,
     )
-    return _render_daily_usage_report_from_state(state, _normalize_skill_summary_fields(skill_summaries))
+    return result

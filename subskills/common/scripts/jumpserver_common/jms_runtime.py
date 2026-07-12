@@ -22,6 +22,8 @@ import os
 import re
 import stat
 import sys
+import tempfile
+from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -83,6 +85,13 @@ SENSITIVE_FIELD_NAMES = frozenset(
     }
 )
 WRITEABLE_ENV_KEYS = frozenset(ENV_KEYS)
+ENV_FORMAT_PREFIX = "# jumpserver-skills-env-format:"
+ENV_FORMAT_VERSION = 1
+ENV_FORMAT_HEADER = "%s %s" % (ENV_FORMAT_PREFIX, ENV_FORMAT_VERSION)
+ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+RECOVERABLE_ENV_REASON_CODES = frozenset(
+    {"invalid_env_encoding", "invalid_env_format", "invalid_env_value"}
+)
 NONSECRET_ENV_KEYS = (
     "JMS_API_URL",
     "JMS_USERNAME",
@@ -165,6 +174,32 @@ def parse_bool(value: Any, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
+def parse_strict_bool(value: Any, *, field_name: str = "value", default: bool | None = None) -> bool:
+    if value is None or value == "":
+        if default is not None:
+            return bool(default)
+        normalized = ""
+    elif isinstance(value, bool):
+        return value
+    else:
+        normalized = str(value).strip().lower()
+
+    if normalized in {"1", "true", "yes", "on", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "off", "n"}:
+        return False
+    raise CLIError(
+        "Invalid boolean value for %s." % field_name,
+        payload=build_cli_guidance_payload(
+            "invalid_boolean_value",
+            user_message="`%s` 只接受 true/false、1/0、yes/no、on/off 或 y/n。" % field_name,
+            action_hint="请修正布尔值后重试；未知值不会自动按 false 处理。",
+            field=field_name,
+            invalid_value=value,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Section: Sensitive redaction
 # ---------------------------------------------------------------------------
@@ -216,6 +251,576 @@ def _strip_wrapping_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def _invalid_env_format_error(
+    env_path: Path,
+    *,
+    line_number: int | None = None,
+    field: str | None = None,
+) -> CLIError:
+    return CLIError(
+        "Invalid .env format.",
+        payload=build_cli_guidance_payload(
+            "invalid_env_format",
+            user_message="`.env` 格式无效，无法安全读取运行时配置。",
+            action_hint="请备份并修正对应行；若无法修复，先移走损坏文件，再用 `config-write --confirm` 重新生成。",
+            env_file_path=str(env_path),
+            line_number=line_number,
+            field=field,
+        ),
+    )
+
+
+def _validate_env_value(value: Any, *, field: str, line_number: int | None = None) -> str:
+    text = str(value)
+    invalid_controls = [
+        name
+        for name, marker in (("CR", "\r"), ("LF", "\n"), ("NUL", "\x00"))
+        if marker in text
+    ]
+    unicode_valid = True
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        unicode_valid = False
+    if not unicode_valid:
+        raise CLIError(
+            "Invalid Unicode value in .env field %s." % field,
+            payload=build_cli_guidance_payload(
+                "invalid_env_value",
+                user_message="`.env` 字段 `%s` 包含无法编码为 UTF-8 的字符。" % field,
+                action_hint="请重新输入该字段；错误信息不会回显原值。",
+                field=field,
+                line_number=line_number,
+                invalid_character_types=["invalid_unicode"],
+            ),
+        )
+    if invalid_controls:
+        raise CLIError(
+            "Invalid control character in .env field %s." % field,
+            payload=build_cli_guidance_payload(
+                "invalid_env_value",
+                user_message="`.env` 字段 `%s` 只能保存单行值。" % field,
+                action_hint="请移除 CR、LF 或 NUL 控制字符后重试。",
+                field=field,
+                line_number=line_number,
+                invalid_character_types=invalid_controls,
+            ),
+        )
+    return text
+
+
+def _decode_env_value(
+    value: str,
+    *,
+    format_version: int,
+    env_path: Path,
+    line_number: int,
+    field: str,
+) -> str:
+    raw_value = value.strip()
+    if format_version == 0:
+        if raw_value[:1] in {"'", '"'} and (len(raw_value) < 2 or raw_value[-1] != raw_value[0]):
+            raise _invalid_env_format_error(env_path, line_number=line_number, field=field)
+        decoded = _strip_wrapping_quotes(raw_value)
+    else:
+        decoded_valid = True
+        try:
+            decoded = json.loads(raw_value)
+        except (json.JSONDecodeError, TypeError):
+            decoded_valid = False
+            decoded = None
+        if not decoded_valid or not isinstance(decoded, str):
+            raise _invalid_env_format_error(env_path, line_number=line_number, field=field)
+    return _validate_env_value(decoded, field=field, line_number=line_number)
+
+
+def _serialize_env_config(values: dict[str, str], env_path: Path) -> bytes:
+    lines = [ENV_FORMAT_HEADER]
+    for key in sorted(values):
+        if not ENV_KEY_RE.fullmatch(key):
+            raise _invalid_env_format_error(env_path)
+        value = _validate_env_value(values[key], field=key)
+        lines.append("%s=%s" % (key, json.dumps(value, ensure_ascii=False)))
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _prepare_env_temp(env_path: Path, payload: bytes) -> Path:
+    temp_path: Path | None = None
+    try:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        file_descriptor, temp_name = tempfile.mkstemp(
+            prefix=".%s." % env_path.name,
+            suffix=".tmp",
+            dir=str(env_path.parent),
+        )
+        temp_path = Path(temp_name)
+        with os.fdopen(file_descriptor, "wb") as handle:
+            fchmod = getattr(os, "fchmod", None)
+            if callable(fchmod):
+                fchmod(handle.fileno(), stat.S_IRUSR | stat.S_IWUSR)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return temp_path
+    except OSError:
+        if temp_path is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        raise CLIError(
+            "Failed to write local .env configuration.",
+            payload=build_cli_guidance_payload(
+                "env_write_failed",
+                user_message="本地 `.env` 写入失败，原文件已保留。",
+                action_hint="请检查目录权限和可用空间后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+
+def _atomic_write_env(env_path: Path, payload: bytes) -> None:
+    temp_path = _prepare_env_temp(env_path, payload)
+    try:
+        os.replace(temp_path, env_path)
+    except OSError:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        raise CLIError(
+            "Failed to write local .env configuration.",
+            payload=build_cli_guidance_payload(
+                "env_write_failed",
+                user_message="本地 `.env` 写入失败，原文件已保留。",
+                action_hint="请检查目录权限和可用空间后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+
+def _env_stat_signature(stat_result: os.stat_result) -> tuple[int, int, int, int]:
+    return (
+        stat_result.st_dev,
+        stat_result.st_ino,
+        stat_result.st_size,
+        stat_result.st_mtime_ns,
+    )
+
+
+def _env_recovery_not_required_error(env_path: Path) -> CLIError:
+    return CLIError(
+        "Invalid .env recovery is not required.",
+        payload=build_cli_guidance_payload(
+            "env_recovery_not_required",
+            user_message="`--recover-invalid-env` 只用于恢复现存且无法解析的 `.env`。",
+            action_hint="文件缺失时去掉恢复参数直接创建；文件正常时使用普通 `config-write --confirm`。",
+            env_file_path=str(env_path),
+        ),
+    )
+
+
+def _read_env_recovery_snapshot(env_path: Path) -> tuple[bytes, tuple[int, int, int, int]]:
+    file_descriptor: int | None = None
+    try:
+        before = os.lstat(env_path)
+    except FileNotFoundError:
+        raise _env_recovery_not_required_error(env_path)
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise CLIError(
+            "Unsafe .env recovery path.",
+            payload=build_cli_guidance_payload(
+                "unsafe_env_recovery_path",
+                user_message="损坏配置恢复只接受普通 `.env` 文件，不处理符号链接或其他文件类型。",
+                action_hint="请先确认实际文件路径并手工处理链接或特殊文件。",
+                env_file_path=str(env_path),
+            ),
+        )
+    try:
+        flags = os.O_RDONLY
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if nofollow:
+            flags |= nofollow
+        file_descriptor = os.open(env_path, flags)
+        opened = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened.st_mode) or _env_stat_signature(opened) != _env_stat_signature(before):
+            raise OSError(".env changed before recovery snapshot")
+        with os.fdopen(file_descriptor, "rb") as handle:
+            file_descriptor = None
+            raw = handle.read()
+            after = os.fstat(handle.fileno())
+    except OSError:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+        raise CLIError(
+            "Failed to read invalid .env for recovery.",
+            payload=build_cli_guidance_payload(
+                "env_recovery_read_failed",
+                user_message="无法读取待恢复 `.env` 的原始字节。",
+                action_hint="请检查文件权限和路径后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+    signature = _env_stat_signature(before)
+    if signature != _env_stat_signature(after) or len(raw) != after.st_size:
+        raise CLIError(
+            "The invalid .env changed during recovery.",
+            payload=build_cli_guidance_payload(
+                "env_recovery_conflict",
+                user_message="待恢复 `.env` 在读取期间发生变化，已停止替换。",
+                action_hint="确认没有其他进程修改该文件后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+    return raw, signature
+
+
+@contextmanager
+def _local_env_write_lock(env_path: Path):
+    lock_path = env_path.with_name("%s.lock" % env_path.name)
+    file_descriptor: int | None = None
+    locked = False
+    try:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            existing_lock = os.lstat(lock_path)
+        except FileNotFoundError:
+            existing_lock = None
+        if existing_lock is not None and (
+            stat.S_ISLNK(existing_lock.st_mode) or not stat.S_ISREG(existing_lock.st_mode)
+        ):
+            raise OSError("unsafe .env lock path")
+        flags = os.O_RDWR | os.O_CREAT
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        if nofollow:
+            flags |= nofollow
+        file_descriptor = os.open(lock_path, flags, stat.S_IRUSR | stat.S_IWUSR)
+        opened_lock = os.fstat(file_descriptor)
+        current_lock = os.lstat(lock_path)
+        if (
+            not stat.S_ISREG(opened_lock.st_mode)
+            or stat.S_ISLNK(current_lock.st_mode)
+            or not os.path.samestat(opened_lock, current_lock)
+        ):
+            raise OSError("unsafe .env lock file")
+        fchmod = getattr(os, "fchmod", None)
+        if callable(fchmod):
+            fchmod(file_descriptor, stat.S_IRUSR | stat.S_IWUSR)
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(file_descriptor).st_size == 0:
+                os.write(file_descriptor, b"\0")
+                os.fsync(file_descriptor)
+            os.lseek(file_descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(file_descriptor, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(file_descriptor, fcntl.LOCK_EX)
+        current_lock = os.lstat(lock_path)
+        if stat.S_ISLNK(current_lock.st_mode) or not os.path.samestat(os.fstat(file_descriptor), current_lock):
+            raise OSError(".env lock path changed during acquisition")
+        locked = True
+    except OSError:
+        if file_descriptor is not None:
+            os.close(file_descriptor)
+        raise CLIError(
+            "Failed to lock local .env configuration.",
+            payload=build_cli_guidance_payload(
+                "env_lock_failed",
+                user_message="无法获取本地 `.env` 写锁，配置未修改。",
+                action_hint="请确认目录可写且没有异常锁占用后重试。",
+                env_file_path=str(env_path),
+                lock_file_path=str(lock_path),
+            ),
+        )
+
+    try:
+        yield lock_path
+    finally:
+        if file_descriptor is not None:
+            try:
+                try:
+                    if locked and os.name == "nt":
+                        import msvcrt
+
+                        os.lseek(file_descriptor, 0, os.SEEK_SET)
+                        msvcrt.locking(file_descriptor, msvcrt.LK_UNLCK, 1)
+                    elif locked:
+                        import fcntl
+
+                        fcntl.flock(file_descriptor, fcntl.LOCK_UN)
+                except OSError:
+                    pass
+            finally:
+                try:
+                    os.close(file_descriptor)
+                except OSError:
+                    pass
+
+
+def _ensure_env_recovery_snapshot_unchanged(
+    env_path: Path,
+    raw: bytes,
+    signature: tuple[int, int, int, int],
+) -> None:
+    try:
+        current_raw, current_signature = _read_env_recovery_snapshot(env_path)
+        unchanged = current_signature == signature and current_raw == raw
+    except CLIError:
+        unchanged = False
+    if not unchanged:
+        raise CLIError(
+            "The invalid .env changed during recovery.",
+            payload=build_cli_guidance_payload(
+                "env_recovery_conflict",
+                user_message="待恢复 `.env` 在备份或替换前发生变化，原文件未被覆盖。",
+                action_hint="确认没有其他进程修改该文件后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+
+def _backup_invalid_env(env_path: Path, raw: bytes) -> Path:
+    backup_path: Path | None = None
+    try:
+        file_descriptor, backup_name = tempfile.mkstemp(
+            prefix="%s.recovery-" % env_path.name,
+            suffix=".bak",
+            dir=str(env_path.parent),
+        )
+        backup_path = Path(backup_name)
+        with os.fdopen(file_descriptor, "wb") as handle:
+            fchmod = getattr(os, "fchmod", None)
+            if callable(fchmod):
+                fchmod(handle.fileno(), stat.S_IRUSR | stat.S_IWUSR)
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return backup_path
+    except OSError:
+        if backup_path is not None:
+            try:
+                backup_path.unlink()
+            except OSError:
+                pass
+        raise CLIError(
+            "Failed to back up invalid .env.",
+            payload=build_cli_guidance_payload(
+                "env_backup_failed",
+                user_message="损坏 `.env` 备份失败，原文件未被替换。",
+                action_hint="请检查目录权限和可用空间后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+
+def _verify_recovery_hardlink_support(env_path: Path) -> None:
+    source_path: Path | None = None
+    destination_path: Path | None = None
+    try:
+        source_fd, source_name = tempfile.mkstemp(
+            prefix="%s.recovery-preflight-" % env_path.name,
+            suffix=".tmp",
+            dir=str(env_path.parent),
+        )
+        source_path = Path(source_name)
+        os.close(source_fd)
+        destination_fd, destination_name = tempfile.mkstemp(
+            prefix="%s.recovery-preflight-" % env_path.name,
+            suffix=".link",
+            dir=str(env_path.parent),
+        )
+        destination_path = Path(destination_name)
+        os.close(destination_fd)
+        destination_path.unlink()
+        os.link(source_path, destination_path)
+    except OSError:
+        raise CLIError(
+            "Filesystem does not support safe damaged .env recovery.",
+            payload=build_cli_guidance_payload(
+                "env_recovery_hardlink_unsupported",
+                user_message="当前目录不支持恢复所需的同目录硬链接，原 `.env` 未移动。",
+                action_hint="请先把 skill 目录移到支持硬链接的本地文件系统，或手工备份并重建 `.env`。",
+                env_file_path=str(env_path),
+            ),
+        )
+    finally:
+        for candidate in (destination_path, source_path):
+            if candidate is not None:
+                try:
+                    candidate.unlink()
+                except OSError:
+                    pass
+
+
+def _reserve_recovery_stage_path(env_path: Path) -> Path:
+    stage_path: Path | None = None
+    try:
+        file_descriptor, stage_name = tempfile.mkstemp(
+            prefix="%s.recovery-" % env_path.name,
+            suffix=".stage",
+            dir=str(env_path.parent),
+        )
+        stage_path = Path(stage_name)
+        os.close(file_descriptor)
+        return stage_path
+    except OSError:
+        if stage_path is not None:
+            try:
+                stage_path.unlink()
+            except OSError:
+                pass
+        raise CLIError(
+            "Failed to prepare damaged .env recovery.",
+            payload=build_cli_guidance_payload(
+                "env_write_failed",
+                user_message="无法准备损坏 `.env` 的安全替换步骤，原文件未修改。",
+                action_hint="请检查目录权限和文件系统能力后重试。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+
+def _restore_recovery_stage(stage_path: Path, env_path: Path) -> bool:
+    try:
+        os.link(stage_path, env_path)
+    except OSError:
+        return False
+    try:
+        stage_path.unlink()
+    except OSError:
+        pass
+    return True
+
+
+def _recovery_commit_error(
+    reason_code: str,
+    env_path: Path,
+    backup_path: Path,
+    stage_path: Path,
+    *,
+    restored: bool,
+) -> CLIError:
+    return CLIError(
+        "Damaged .env recovery could not be committed safely.",
+        payload=build_cli_guidance_payload(
+            reason_code,
+            user_message=(
+                "待恢复 `.env` 在提交期间发生变化，未覆盖并发写入。"
+                if reason_code == "env_recovery_conflict"
+                else "新 `.env` 安装失败，旧文件已尽可能恢复。"
+            ),
+            action_hint="确认没有其他进程修改 `.env`，检查文件系统是否支持同目录硬链接后重试。",
+            env_file_path=str(env_path),
+            backup_file_path=str(backup_path),
+            staged_file_path=str(stage_path) if stage_path.exists() else None,
+            original_restored=restored,
+        ),
+    )
+
+
+def _commit_recovered_env(
+    env_path: Path,
+    payload: bytes,
+    recovery_raw: bytes,
+    recovery_signature: tuple[int, int, int, int],
+    backup_path: Path,
+) -> Path | None:
+    stage_path = _reserve_recovery_stage_path(env_path)
+    moved = False
+    try:
+        os.replace(env_path, stage_path)
+        moved = True
+        stage_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    except OSError:
+        if moved:
+            restored = _restore_recovery_stage(stage_path, env_path)
+        else:
+            restored = env_path.exists()
+            try:
+                stage_path.unlink()
+            except OSError:
+                pass
+        raise _recovery_commit_error(
+            "env_write_failed",
+            env_path,
+            backup_path,
+            stage_path,
+            restored=restored,
+        )
+
+    try:
+        staged_raw, staged_signature = _read_env_recovery_snapshot(stage_path)
+    except CLIError:
+        restored = _restore_recovery_stage(stage_path, env_path)
+        raise _recovery_commit_error(
+            "env_recovery_conflict",
+            env_path,
+            backup_path,
+            stage_path,
+            restored=restored,
+        )
+    if staged_signature != recovery_signature or staged_raw != recovery_raw:
+        restored = _restore_recovery_stage(stage_path, env_path)
+        raise _recovery_commit_error(
+            "env_recovery_conflict",
+            env_path,
+            backup_path,
+            stage_path,
+            restored=restored,
+        )
+
+    try:
+        temp_path = _prepare_env_temp(env_path, payload)
+    except CLIError as exc:
+        restored = _restore_recovery_stage(stage_path, env_path)
+        exc.payload["backup_file_path"] = str(backup_path)
+        exc.payload["staged_file_path"] = str(stage_path) if stage_path.exists() else None
+        exc.payload["original_restored"] = restored
+        raise
+
+    try:
+        os.link(temp_path, env_path)
+    except FileExistsError:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        restored = _restore_recovery_stage(stage_path, env_path)
+        raise _recovery_commit_error(
+            "env_recovery_conflict",
+            env_path,
+            backup_path,
+            stage_path,
+            restored=restored,
+        )
+    except OSError:
+        try:
+            temp_path.unlink()
+        except OSError:
+            pass
+        restored = _restore_recovery_stage(stage_path, env_path)
+        raise _recovery_commit_error(
+            "env_write_failed",
+            env_path,
+            backup_path,
+            stage_path,
+            restored=restored,
+        )
+
+    try:
+        temp_path.unlink()
+    except OSError:
+        pass
+    try:
+        stage_path.unlink()
+    except OSError:
+        return stage_path
+    return None
 
 
 def has_cli_value(value: Any) -> bool:
@@ -301,24 +906,71 @@ def parse_filter_assignments(
 # ---------------------------------------------------------------------------
 # Section: Local env I/O
 # ---------------------------------------------------------------------------
-def read_local_env(path: Path | None = None) -> dict[str, str]:
-    env_path = Path(path or LOCAL_ENV_FILE)
-    if not env_path.exists():
-        return {}
+def _parse_local_env_bytes(raw: bytes, env_path: Path) -> dict[str, str]:
+    decode_valid = True
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        decode_valid = False
+        text = ""
+    if not decode_valid:
+        raise CLIError(
+            "Local .env must use UTF-8 encoding.",
+            payload=build_cli_guidance_payload(
+                "invalid_env_encoding",
+                user_message="本地 `.env` 不是有效 UTF-8 文件。",
+                action_hint="请把文件转换为 UTF-8（允许 BOM）后重试；不要使用忽略错误或自动猜测编码。",
+                env_file_path=str(env_path),
+            ),
+        )
+
+    raw_lines = text.split("\n")
+    format_version = 0
+    header_lines = [
+        index
+        for index, raw_line in enumerate(raw_lines)
+        if raw_line.strip().startswith(ENV_FORMAT_PREFIX)
+    ]
+    if header_lines:
+        if header_lines != [0]:
+            raise _invalid_env_format_error(env_path, line_number=header_lines[0] + 1)
+        version = raw_lines[0].strip()[len(ENV_FORMAT_PREFIX) :].strip()
+        if version != str(ENV_FORMAT_VERSION):
+            raise _invalid_env_format_error(env_path, line_number=1)
+        format_version = ENV_FORMAT_VERSION
+
     payload: dict[str, str] = {}
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+    for line_number, raw_line in enumerate(raw_lines, start=1):
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("export "):
             line = line[7:].strip()
         if "=" not in line:
+            if format_version:
+                raise _invalid_env_format_error(env_path, line_number=line_number)
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        if key:
-            payload[key] = _strip_wrapping_quotes(value.strip())
+        if not key or (format_version and not ENV_KEY_RE.fullmatch(key)):
+            if format_version:
+                raise _invalid_env_format_error(env_path, line_number=line_number)
+            continue
+        payload[key] = _decode_env_value(
+            value,
+            format_version=format_version,
+            env_path=env_path,
+            line_number=line_number,
+            field=key,
+        )
     return payload
+
+
+def read_local_env(path: Path | None = None) -> dict[str, str]:
+    env_path = Path(path or LOCAL_ENV_FILE)
+    if not env_path.exists():
+        return {}
+    return _parse_local_env_bytes(env_path.read_bytes(), env_path)
 
 
 def load_local_env(path: Path | None = None) -> None:
@@ -336,48 +988,12 @@ def current_runtime_values(path: Path | None = None) -> dict[str, str]:
     return values
 
 
-def write_local_env_config(payload: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
-    env_path = Path(path or LOCAL_ENV_FILE)
-    final: dict[str, str] = {}
-    current = read_local_env(env_path)
-    final.update({key: value for key, value in current.items() if key not in WRITEABLE_ENV_KEYS})
-
-    for key in WRITEABLE_ENV_KEYS:
-        value = payload.get(key)
-        if value is None:
-            if key in current:
-                final[key] = current[key]
-            continue
-        final[key] = str(value)
-
-    env_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = []
-    for key in sorted(final):
-        value = final[key]
-        if value is None:
-            continue
-        lines.append('%s="%s"' % (key, str(value).replace('"', '\\"')))
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    try:
-        env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
-    except OSError:
-        pass
-    for key in WRITEABLE_ENV_KEYS:
-        if key in final:
-            os.environ[key] = str(final[key])
-    return {
-        "env_file_path": str(env_path),
-        "current_nonsecret": current_nonsecret_view(current_runtime_values(env_path)),
-    }
-
-
-def current_nonsecret_view(values: dict[str, str] | None = None) -> dict[str, str]:
-    payload = dict(values or current_runtime_values())
-    return {key: payload[key] for key in NONSECRET_ENV_KEYS if key in payload and payload[key] != ""}
-
-
-def get_config_status(path: Path | None = None) -> dict[str, Any]:
-    values = current_runtime_values(path)
+def _build_config_status(
+    values: dict[str, str],
+    env_path: Path,
+    *,
+    exists: bool,
+) -> dict[str, Any]:
     missing = []
     invalid_fields = []
     partial_auth_fields = []
@@ -426,9 +1042,16 @@ def get_config_status(path: Path | None = None) -> dict[str, Any]:
         except ValueError:
             invalid_fields.append("JMS_TIMEOUT")
 
+    verify_tls_value = values.get("JMS_VERIFY_TLS")
+    if verify_tls_value not in {None, ""}:
+        try:
+            parse_strict_bool(verify_tls_value, field_name="JMS_VERIFY_TLS")
+        except CLIError:
+            invalid_fields.append("JMS_VERIFY_TLS")
+
     return {
-        "env_file_path": str(Path(path or LOCAL_ENV_FILE)),
-        "exists": Path(path or LOCAL_ENV_FILE).exists(),
+        "env_file_path": str(env_path),
+        "exists": exists,
         "complete": not missing and not invalid_fields,
         "missing_fields": missing,
         "invalid_fields": invalid_fields,
@@ -437,18 +1060,165 @@ def get_config_status(path: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _write_local_env_config_locked(
+    payload: dict[str, Any],
+    env_path: Path,
+    *,
+    recover_invalid: bool = False,
+) -> dict[str, Any]:
+    recovery_reason_code: str | None = None
+    recovery_raw: bytes | None = None
+    recovery_signature: tuple[int, int, int, int] | None = None
+    backup_path: Path | None = None
+    recovery_stage_path: Path | None = None
+
+    if recover_invalid:
+        recovery_raw, recovery_signature = _read_env_recovery_snapshot(env_path)
+        try:
+            _parse_local_env_bytes(recovery_raw, env_path)
+        except CLIError as exc:
+            reason_code = str(exc.payload.get("reason_code") or "")
+            if reason_code not in RECOVERABLE_ENV_REASON_CODES:
+                raise
+            recovery_reason_code = reason_code
+        else:
+            raise _env_recovery_not_required_error(env_path)
+        _ensure_env_recovery_snapshot_unchanged(env_path, recovery_raw, recovery_signature)
+        current: dict[str, str] = {}
+    else:
+        current = read_local_env(env_path)
+
+    final: dict[str, str] = {}
+    final.update({key: value for key, value in current.items() if key not in WRITEABLE_ENV_KEYS})
+
+    for key in WRITEABLE_ENV_KEYS:
+        value = payload.get(key)
+        if value is None:
+            if key in current:
+                final[key] = current[key]
+            continue
+        if key == "JMS_VERIFY_TLS":
+            final[key] = "true" if parse_strict_bool(value, field_name=key) else "false"
+        else:
+            final[key] = str(value)
+
+    encoded = _serialize_env_config(final, env_path)
+    if recover_invalid:
+        unknown_fields = sorted(str(key) for key in payload if key not in WRITEABLE_ENV_KEYS)
+        replacement_status = _build_config_status(final, env_path, exists=True)
+        if unknown_fields or not replacement_status["complete"]:
+            raise CLIError(
+                "Invalid replacement payload for damaged .env.",
+                payload=build_cli_guidance_payload(
+                    "invalid_env_recovery_payload",
+                    user_message="恢复损坏 `.env` 必须显式提供一份完整且合法的新配置。",
+                    action_hint="请提供 JMS_API_URL 和至少一套完整认证；修正未知、缺失或非法字段后重试。",
+                    env_file_path=str(env_path),
+                    unknown_fields=unknown_fields,
+                    missing_fields=replacement_status["missing_fields"],
+                    invalid_fields=replacement_status["invalid_fields"],
+                ),
+            )
+        _verify_recovery_hardlink_support(env_path)
+        backup_path = _backup_invalid_env(env_path, recovery_raw)
+        try:
+            recovery_stage_path = _commit_recovered_env(
+                env_path,
+                encoded,
+                recovery_raw,
+                recovery_signature,
+                backup_path,
+            )
+        except CLIError as exc:
+            exc.payload["backup_file_path"] = str(backup_path)
+            raise
+    else:
+        _atomic_write_env(env_path, encoded)
+
+    if recover_invalid:
+        for key in WRITEABLE_ENV_KEYS:
+            os.environ.pop(key, None)
+    for key in WRITEABLE_ENV_KEYS:
+        if key in final:
+            os.environ[key] = str(final[key])
+
+    result = {
+        "env_file_path": str(env_path),
+        "current_nonsecret": current_nonsecret_view(current_runtime_values(env_path)),
+    }
+    if recover_invalid:
+        result.update(
+            {
+                "recovered_invalid_env": True,
+                "recovery_reason_code": recovery_reason_code,
+                "backup_file_path": str(backup_path),
+                "staged_file_path": str(recovery_stage_path) if recovery_stage_path is not None else None,
+            }
+        )
+    return result
+
+
+def write_local_env_config(
+    payload: dict[str, Any],
+    path: Path | None = None,
+    *,
+    recover_invalid: bool = False,
+) -> dict[str, Any]:
+    env_path = Path(path or LOCAL_ENV_FILE)
+    if recover_invalid:
+        recovery_raw, _ = _read_env_recovery_snapshot(env_path)
+        try:
+            _parse_local_env_bytes(recovery_raw, env_path)
+        except CLIError as exc:
+            if str(exc.payload.get("reason_code") or "") not in RECOVERABLE_ENV_REASON_CODES:
+                raise
+        else:
+            raise _env_recovery_not_required_error(env_path)
+    with _local_env_write_lock(env_path):
+        return _write_local_env_config_locked(
+            payload,
+            env_path,
+            recover_invalid=recover_invalid,
+        )
+
+
+def current_nonsecret_view(values: dict[str, str] | None = None) -> dict[str, str]:
+    payload = dict(values or current_runtime_values())
+    return {key: payload[key] for key in NONSECRET_ENV_KEYS if key in payload and payload[key] != ""}
+
+
+def get_config_status(path: Path | None = None) -> dict[str, Any]:
+    env_path = Path(path or LOCAL_ENV_FILE)
+    return _build_config_status(
+        current_runtime_values(path),
+        env_path,
+        exists=env_path.exists(),
+    )
+
+
 def parse_json_arg(
     value: str | None,
     *,
     default: dict[str, Any] | None = None,
     source: str = "--filters",
     usage_examples: list[str] | None = None,
+    include_raw_value: bool = True,
 ) -> dict[str, Any]:
     if value in {None, ""}:
         return dict(default or {})
+    parser_error = None
     try:
         payload = json.loads(value)
     except json.JSONDecodeError as exc:
+        parser_error = exc.msg
+        payload = None
+    if parser_error is not None:
+        details = {
+            "input_name": source,
+            "parser_error": parser_error,
+        }
+        if include_raw_value:
+            details["raw_value"] = value
         raise CLIError(
             "无法解析 %s 参数。" % source,
             payload=build_cli_guidance_payload(
@@ -456,12 +1226,13 @@ def parse_json_arg(
                 user_message="%s 需要传入 JSON 对象字符串，例如 '{\"name\": \"Default\"}'。" % source,
                 action_hint="优先改用显式参数或重复的 `--filter key=value`；如果继续使用 JSON，请检查引号、逗号和花括号。",
                 suggested_commands=usage_examples,
-                input_name=source,
-                parser_error=exc.msg,
-                raw_value=value,
+                **details,
             ),
-        ) from exc
+        )
     if not isinstance(payload, dict):
+        details = {"input_name": source}
+        if include_raw_value:
+            details["raw_value"] = value
         raise CLIError(
             "%s 必须是 JSON 对象。" % source,
             payload=build_cli_guidance_payload(
@@ -469,8 +1240,7 @@ def parse_json_arg(
                 user_message="%s 需要传入 JSON 对象，而不是数组或普通字符串。" % source,
                 action_hint="请改成 `{\"key\": \"value\"}` 这种对象形式，或直接使用显式参数 / `--filter key=value`。",
                 suggested_commands=usage_examples,
-                input_name=source,
-                raw_value=value,
+                **details,
             ),
         )
     return payload
@@ -665,7 +1435,7 @@ def build_config(*, org_id: str | None = None) -> JumpServerConfig:
         username=username,
         password=password,
         org_id=org_id if org_id is not None else values.get("JMS_ORG_ID", ""),
-        verify_tls=parse_bool(values.get("JMS_VERIFY_TLS"), default=False),
+        verify_tls=parse_strict_bool(values.get("JMS_VERIFY_TLS"), field_name="JMS_VERIFY_TLS", default=False),
     ).validate(require_org_id=False)
 
 

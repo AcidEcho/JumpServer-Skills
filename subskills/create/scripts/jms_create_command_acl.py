@@ -28,7 +28,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
-    parse_bool,
+    parse_strict_bool,
     parse_json_arg,
     preview_create_org_context,
     raise_create_global_org_error,
@@ -416,6 +416,8 @@ def _build_command_group_payload(args: argparse.Namespace) -> dict[str, Any]:
         reason_code="invalid_create_command_group_payload_fields",
         examples=CREATE_COMMAND_GROUP_EXAMPLES,
     )
+    if "ignore_case" in payload:
+        payload["ignore_case"] = parse_strict_bool(payload.get("ignore_case"), field_name="ignore_case")
     return {
         key: value
         for key, value in payload.items()
@@ -444,7 +446,7 @@ def _build_command_filter_rule_payload(args: argparse.Namespace) -> dict[str, An
     if getattr(args, "reviewer", None):
         payload["reviewers"] = _normalize_reviewer_pk_list(args.reviewer)
     if has_cli_value(args.is_active):
-        payload["is_active"] = parse_bool(args.is_active)
+        payload["is_active"] = parse_strict_bool(args.is_active, field_name="is_active")
     if has_cli_value(args.comment):
         payload["comment"] = args.comment
     _reject_unknown_fields(
@@ -468,7 +470,7 @@ def _build_command_filter_rule_payload(args: argparse.Namespace) -> dict[str, An
     if "reviewers" in payload:
         payload["reviewers"] = _normalize_reviewer_pk_list(payload.get("reviewers"))
     if "is_active" in payload:
-        payload["is_active"] = parse_bool(payload.get("is_active"))
+        payload["is_active"] = parse_strict_bool(payload.get("is_active"), field_name="is_active")
     if "users" in payload:
         payload["users"] = _normalize_selector(payload.get("users"))
     if "assets" in payload:
@@ -746,8 +748,6 @@ def main() -> int:
     def _run_cli():
         parser = build_parser()
         args = parser.parse_args(sys.argv[1:])
-        if getattr(args, "ignore_case", None) is not None:
-            args.ignore_case = parse_bool(args.ignore_case)
         return args.func(args)
 
     return run_and_print(_run_cli)

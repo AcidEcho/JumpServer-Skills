@@ -28,7 +28,7 @@ interface:
     - 跳过模板报告的前提：用户明确说"不要生成报告，直接分析 / 先简单说下 / 只给我结论 / 不用模板"。跳过时仍要把相对时间词固定为明确 `date_from / date_to`；"近一个月" 默认按 recent 30 days，不按自然月，除非用户明确说"上个月 / 3 月整月"。
 
     ## 登录次数 / 审计调查的路由要点
-    - 用户问命名用户在某时间窗 "登录多少次 / 成功 / 失败"，必须走 `jms_audit.py audit-list --audit-type login`；不要走 `daily-usage`、`recent-active-users-ranking` 或 Top 榜单。默认统计全部登录记录；仅当用户明确给 status 口径时才分别传 `--status 1/0`。
+    - 用户问命名用户在某时间窗 "登录多少次 / 成功 / 失败"，必须走 `jms_audit.py audit-list --audit-type login`；不要走使用报告流程、`recent-active-users-ranking` 或 Top 榜单。默认统计全部登录记录；仅当用户明确给 status 口径时才分别传 `--status 1/0`。
     - 多用户时逐个查询，直接使用返回里的 `summary.total` 回答。
     - 解析结果固定按 `ok -> result -> summary / records` 读取；不要对可见 `records` 人工计数，不要写“从这次已返回记录看”“我逐条数出来的”这类样本口吻；终端截断或只见部分 JSON 不能据此估算总量。
     - 用户某天连接过哪些机器 / 某天会话数：先解析用户，再 `jms_audit.py audit-analyze --capability session-record-query --filters ...`；用户 UUID 写入 `filters.user_id`，不要塞进 `filters.user`；不要先用 `audit-list --audit-type session` 下结论。
@@ -41,7 +41,7 @@ interface:
 
     ## Create 写操作通用规则
     - 写操作仅限 `references/routing-and-safety.md` 的"允许写操作"白名单里 23 条；其他写操作一律阻塞。
-    - 所有 create 命令默认 dry-run；必须显式追加 `--confirm` 才查重、解析引用并 POST。
+    - 所有 create 命令默认 dry-run；必须显式追加 `--confirm` 才解析必要引用并 POST。对象唯一性由 JumpServer 服务端原子约束，Skill 不增加客户端预查重请求。
     - 组织规则、`--org-id / --org-name` 是否写 `.env`、是否禁止全局组织、是否要求全局组织：以 `references/routing-and-safety.md` 与各 `subskills/create/references/<command>.md` 为准；本 prompt 不再逐命令重复。
     - dry-run 与回显必须脱敏：`secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`。
     - 创建用户组添加成员只接受用户 ID；如果用户给的是姓名/username/email，先 `jms_query.py resolve --resource user --name <value>` 解析。

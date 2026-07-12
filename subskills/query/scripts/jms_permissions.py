@@ -40,6 +40,7 @@ from jumpserver_common.jms_runtime import (
     org_id_from_context,
     org_context_output,
     parse_bool,
+    parse_strict_bool,
     reject_deprecated_pagination_cli_args,
     run_and_print,
 )
@@ -383,17 +384,19 @@ def _resolve_command_query_scope(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _permission_list(args: argparse.Namespace) -> dict[str, Any]:
-    context = ensure_selected_org_context()
-    org_id = org_id_from_context(context)
-    client = create_client(org_id=org_id)
     filters = merge_filter_args(
         args,
         explicit_fields=("name", "search", "user", "user_id", "users", "is_expired"),
         forbidden_fields=("limit", "offset"),
         usage_examples=PERMISSION_LIST_EXAMPLES,
     )
+    if filters.get("is_expired") not in {None, ""}:
+        filters["is_expired"] = parse_strict_bool(filters.get("is_expired"), field_name="is_expired")
     if args.resource != "asset-permission":
         filters.pop("user_id", None)
+    context = ensure_selected_org_context()
+    org_id = org_id_from_context(context)
+    client = create_client(org_id=org_id)
     path = _permission_resource_path(args.resource)
     records = client.list_paginated(path, params=filters)
     filtered_records = [item for item in records if isinstance(item, dict)] if isinstance(records, list) else records
@@ -462,7 +465,7 @@ def _permission_list(args: argparse.Namespace) -> dict[str, Any]:
                 summary["current_visible_candidates"] = [_permission_brief(item) for item in visible_sample[:10]]
 
         if filters.get("is_expired") is not None:
-            wanted = parse_bool(filters.get("is_expired"))
+            wanted = filters["is_expired"]
             active_sample = client.list_paginated(path, params={k: v for k, v in filters.items() if k != "is_expired"})
             active_sample = [item for item in active_sample if isinstance(item, dict)] if isinstance(active_sample, list) else []
             summary["requested_is_expired"] = wanted

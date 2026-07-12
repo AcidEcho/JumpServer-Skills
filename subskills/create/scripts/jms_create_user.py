@@ -33,7 +33,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_id_from_context,
     org_context_output,
-    parse_bool,
+    parse_strict_bool,
     persist_selected_org,
     run_and_print,
 )
@@ -276,11 +276,15 @@ def _build_create_user_payload(args: argparse.Namespace) -> dict[str, Any]:
         if not has_cli_value(value):
             continue
         if key in {"need_update_password", "is_active"}:
-            payload[key] = parse_bool(value)
+            payload[key] = parse_strict_bool(value, field_name=key)
         elif key == "mfa_level":
             payload[key] = int(value)
         else:
             payload[key] = value
+
+    for key in ("need_update_password", "is_active"):
+        if key in payload:
+            payload[key] = parse_strict_bool(payload.get(key), field_name=key)
 
     system_roles = _append_values(args.system_role)
     org_roles = _append_values(args.org_role)

@@ -44,7 +44,7 @@ python3 subskills/create/scripts/jms_create_label.py create-label ...
 
 - 无 `--confirm` 只预览 payload，不调用 client。
 - 有 `--confirm` 时直接 POST 创建；唯一性冲突由服务端校验返回。
-- 标签重复时阻塞创建，返回重复标签候选；用户确认后换 `name/value` 重试。
+- 标签冲突时保留服务端状态码与错误详情；用户修正 `name/value` 后重试。
 
 ### 示例
 

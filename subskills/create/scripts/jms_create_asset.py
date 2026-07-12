@@ -29,7 +29,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
-    parse_bool,
+    parse_strict_bool,
     parse_json_arg,
     preview_create_org_context,
     resolve_command_org_context,
@@ -361,12 +361,15 @@ def _build_asset_payload(args: argparse.Namespace, *, asset_type: str) -> dict[s
     if "protocols" in payload:
         payload["protocols"] = _normalize_protocols(payload.get("protocols"))
     if "is_active" in payload:
-        payload["is_active"] = parse_bool(payload.get("is_active"))
+        payload["is_active"] = parse_strict_bool(payload.get("is_active"), field_name="is_active")
     if asset_type == "database":
         if "use_ssl" in payload:
-            payload["use_ssl"] = parse_bool(payload.get("use_ssl"))
+            payload["use_ssl"] = parse_strict_bool(payload.get("use_ssl"), field_name="use_ssl")
         if "allow_invalid_cert" in payload:
-            payload["allow_invalid_cert"] = parse_bool(payload.get("allow_invalid_cert"))
+            payload["allow_invalid_cert"] = parse_strict_bool(
+                payload.get("allow_invalid_cert"),
+                field_name="allow_invalid_cert",
+            )
     return _clean_payload(payload, asset_type=asset_type)
 
 

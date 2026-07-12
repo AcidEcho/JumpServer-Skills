@@ -3,7 +3,7 @@
 ## 快速概览
 
 - common 子 Skill 只负责配置、预检、组织选择、连通性和端点验证。
-- common 允许的本地写入只有 `.env` 运行时配置和 `.env JMS_ORG_ID` 当前组织。
+- common 允许的本地写入只有 `.env` 运行时配置、`.env JMS_ORG_ID` 当前组织、并发保护文件 `.env.lock`，以及恢复使用的 `.env.recovery-*.bak` 备份和临时 `.env.recovery-*.stage`。
 - 全仓库写操作白名单和阻塞规则见根级 [路由与安全边界](../../../references/routing-and-safety.md)。
 
 ## 风险等级
@@ -19,6 +19,7 @@
 |---|---|---|
 | `config-status --json` | 支持 | 读取本地配置状态 |
 | `config-write --confirm` | 支持 | 写入或覆盖本地 `.env` |
+| `config-write --recover-invalid-env --confirm` | 支持 | 仅恢复无法解析的普通 `.env`；先生成 `0600` 的 `.env.recovery-*.bak` |
 | `ping` | 支持 | 验证 JumpServer 连通性 |
 | `select-org` | 支持 | 不带 `--confirm` 只预览 |
 | `select-org --confirm` | 支持 | 写入 `.env JMS_ORG_ID` |

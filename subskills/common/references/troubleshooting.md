@@ -14,6 +14,13 @@
 | `python3: command not found` / 无可用 Python 3 | 本机未安装 Python 3，或命令名不对 | 回到 [runtime.md](runtime.md) 的 Python 3 检查 |
 | `No module named requests` / `Automatic dependency installation failed.` | 当前解释器环境缺依赖、pip 不可用、无网络，或自动安装失败 | 优先查看自动安装错误明细；必要时执行 `python3 -m pip install -r requirements.txt` |
 | `.env` 缺失，或 `JMS_API_URL is required.` | 本地配置未初始化，或地址变量没配置 | 先执行 `python3 subskills/common/scripts/jms_common.py config-status --json` |
+| `invalid_env_encoding` | `.env` 不是有效 UTF-8，或包含损坏字节 | 能确认原值时转换为 UTF-8；否则收集完整新配置后使用 `config-write --payload '<完整-json>' --recover-invalid-env --confirm` |
+| `invalid_env_format` | `.env` 版本头、JSON 字符串或配置行损坏 | 无法可靠修正原文件时，使用 `--recover-invalid-env --confirm` 走备份恢复，不要手工猜测旧密钥 |
+| `invalid_env_value` | 配置值包含真实换行、回车、NUL 或无法编码的 Unicode | 重新输入单行值，移除换行、回车和 NUL；错误返回不会回显原值 |
+| `env_recovery_not_required` | 对正常文件或缺失文件误用了恢复参数 | 正常文件改用普通 `config-write --confirm`；缺失文件直接创建，不传 `--recover-invalid-env` |
+| `env_recovery_conflict` | 恢复提交期间有其他进程修改 `.env` | 不覆盖并发文件；检查 `backup_file_path` 和可选 `staged_file_path`，停止其他写入后再人工核对 |
+| `env_recovery_hardlink_unsupported` | 当前目录位于 exFAT、部分 SMB 或其他不支持同目录硬链接的文件系统 | 原 `.env` 未移动；把 skill 目录迁到支持硬链接的本地文件系统，或手工备份后重建配置 |
+| 恢复成功并返回 `backup_file_path` | 原损坏文件已按原始字节备份为 `.env.recovery-*.bak` | 备份包含凭据且不会自动删除；确认新配置可用后按本地安全策略处理，旧凭据无法可靠反推时应轮换 |
 | `API credential is required.` / 认证凭据缺失 | 未提供完整的 AK/SK 或用户名密码 | 补齐 `JMS_ACCESS_KEY_ID/JMS_ACCESS_KEY_SECRET` 或 `JMS_USERNAME/JMS_PASSWORD` 中至少一组 |
 | 组织结果不符合预期 | 当前组织来自 `.env JMS_ORG_ID`，或本次命令显式传了组织 | 先执行 `python3 subskills/common/scripts/jms_common.py select-org --org-id <org-id> --confirm` 切换当前组织；只想临时覆盖时给业务命令传 `--org-id` |
 | `Unknown capability` | `--capability` 拼写错误，或当前版本未实现 | 先执行 `... capabilities` 查看能力目录 |

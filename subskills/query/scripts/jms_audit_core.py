@@ -24,6 +24,7 @@ from jumpserver_common.jms_runtime import (
     org_id_from_context,
     org_context_output,
     parse_bool,
+    parse_strict_bool,
 )
 
 PERMISSION_PATH = "/api/v1/perms/asset-permissions/"
@@ -2227,6 +2228,11 @@ def _account_activity_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 def _build_account_rows(payload: dict[str, Any], accounts: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    payload = dict(payload)
+    if payload.get("privileged") not in {None, ""}:
+        payload["privileged"] = parse_strict_bool(payload["privileged"], field_name="privileged")
+    if payload.get("is_active") not in {None, ""}:
+        payload["is_active"] = parse_strict_bool(payload["is_active"], field_name="is_active")
     accounts = list(accounts or _fetch_list("/api/v1/accounts/accounts/", _account_inventory_filters(payload)))
     rows = []
     for item in accounts:
@@ -2245,9 +2251,9 @@ def _build_account_rows(payload: dict[str, Any], accounts: list[dict[str, Any]] 
             continue
         if payload.get("asset") and not _match_text(row["asset"], payload["asset"]):
             continue
-        if payload.get("privileged") not in {None, ""} and row["privileged"] != parse_bool(payload["privileged"]):
+        if payload.get("privileged") not in {None, ""} and row["privileged"] != payload["privileged"]:
             continue
-        if payload.get("is_active") not in {None, ""} and bool(row["is_active"]) != parse_bool(payload["is_active"]):
+        if payload.get("is_active") not in {None, ""} and bool(row["is_active"]) != payload["is_active"]:
             continue
         rows.append(row)
     return rows

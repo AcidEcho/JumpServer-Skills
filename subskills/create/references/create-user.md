@@ -52,8 +52,7 @@ python3 subskills/create/scripts/jms_create_user.py create-user ...
 - 用户组失败返回 `failed_reference_type=groups` 与 `available_groups`。
 - 只读查询复用 common discovery endpoint；创建 POST 仍由 create 子 skill 执行。
 
-唯一性冲突由服务端校验返回。
-- 每条重复用户包含 `id`、`name`、`username`、`email`、`is_active`、`matched_fields`。
+唯一性冲突由服务端原子校验返回；Skill 保留服务端状态码与错误详情，不额外查询重复用户候选。
 
 ### 未传不发送
 

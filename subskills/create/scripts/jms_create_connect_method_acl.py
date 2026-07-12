@@ -26,7 +26,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
-    parse_bool,
+    parse_strict_bool,
     parse_json_arg,
     resolve_command_org_context,
     run_and_print,
@@ -102,7 +102,7 @@ def _build_connect_method_acl_payload(args: argparse.Namespace) -> dict[str, Any
     if getattr(args, "connect_method", None):
         payload["connect_methods"] = [item for item in args.connect_method if has_cli_value(item)]
     if has_cli_value(args.is_active):
-        payload["is_active"] = parse_bool(args.is_active)
+        payload["is_active"] = parse_strict_bool(args.is_active, field_name="is_active")
     if has_cli_value(args.comment):
         payload["comment"] = args.comment
     _reject_unknown_fields(payload)
@@ -111,7 +111,7 @@ def _build_connect_method_acl_payload(args: argparse.Namespace) -> dict[str, Any
     if not has_cli_value(payload.get("action")):
         payload["action"] = "reject"
     if "is_active" in payload:
-        payload["is_active"] = parse_bool(payload.get("is_active"))
+        payload["is_active"] = parse_strict_bool(payload.get("is_active"), field_name="is_active")
     return {
         key: value
         for key, value in payload.items()

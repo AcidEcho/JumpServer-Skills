@@ -16,7 +16,7 @@ For first-time use, the natural-language `.env` generation path is usually faste
 
 | Capability Group | You Can Ask | Automatic Entrypoint | Output and Safety Boundary |
 |---|---|---|---|
-| Environment preflight and organization selection | "Check whether the configuration works", "test connectivity", "switch to the Default organization" | `jms_common.py` | Confirms `.env`, authentication, organization, and endpoint first; local writes are limited to `.env`, including current organization selection |
+| Environment preflight and organization selection | “Check whether the configuration works”, “test connectivity”, “switch to the Default organization” | `jms_common.py` | Confirms `.env`, authentication, organization, and endpoint first; local writes are limited to `.env`, `.env.lock`, and `.env.recovery-*` recovery files |
 | Object lookup | "Find this asset/user/account/node/label", "show details for this platform" | `jms_query.py` / `jms_runtime_query.py` | Returns object lists, details, or candidates; asks the user to confirm when an object is ambiguous |
 | User effective access scope | "Which assets/nodes can this user access?", "which accounts and protocols can this user use on this asset?" | `jms_access.py` | Returns effective access results first instead of expanding permission-rule reasoning by default |
 | Permission relationship readback | "Who is this asset authorized to?", "why can this user access it?", "show details for this permission rule" | `jms_permissions.py` | Keeps authorization subjects, actual access users, and super-admin impact separate |

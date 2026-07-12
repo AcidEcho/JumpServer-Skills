@@ -28,7 +28,7 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     merge_filter_args,
     org_context_output,
     org_id_from_context,
-    parse_bool,
+    parse_strict_bool,
     parse_json_arg,
     preview_create_org_context,
     raise_create_global_org_error,
@@ -177,7 +177,7 @@ def _build_data_masking_rule_payload(args: argparse.Namespace) -> dict[str, Any]
     if has_cli_value(args.mask_pattern):
         payload["mask_pattern"] = args.mask_pattern
     if has_cli_value(args.is_active):
-        payload["is_active"] = parse_bool(args.is_active)
+        payload["is_active"] = parse_strict_bool(args.is_active, field_name="is_active")
     if has_cli_value(args.comment):
         payload["comment"] = args.comment
     _reject_unknown_fields(payload)
@@ -194,7 +194,7 @@ def _build_data_masking_rule_payload(args: argparse.Namespace) -> dict[str, Any]
     if "assets" in payload:
         payload["assets"] = _normalize_selector(payload.get("assets"))
     if "is_active" in payload:
-        payload["is_active"] = parse_bool(payload.get("is_active"))
+        payload["is_active"] = parse_strict_bool(payload.get("is_active"), field_name="is_active")
     if _text(payload.get("masking_method")) == "fixed_char" and not has_cli_value(payload.get("mask_pattern")):
         payload["mask_pattern"] = "######"
     if not has_cli_value(payload.get("fields_pattern")):
