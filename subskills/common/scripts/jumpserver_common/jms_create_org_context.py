@@ -87,9 +87,7 @@ def _raise_org_selector_conflict() -> None:
 def _resolve_org_name_context(
     org_name: str,
     *,
-    persist: bool,
     list_accessible_orgs: Callable[[], list[dict[str, Any]]],
-    persist_selected_org: Callable[[str], Any],
 ) -> dict[str, Any]:
     accessible_orgs = list_accessible_orgs()
     wanted = _lower(org_name)
@@ -104,7 +102,7 @@ def _resolve_org_name_context(
             payload=build_cli_guidance_payload(
                 ORG_NOT_ACCESSIBLE_REASON_CODE,
                 user_message="当前账号下找不到你指定的组织，请先从 `candidate_orgs` 里确认可访问组织。",
-                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试；匹配成功后会写入 `.env` 并创建。",
+                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试。",
                 org_name=org_name,
                 candidate_orgs=accessible_orgs,
             ),
@@ -115,25 +113,20 @@ def _resolve_org_name_context(
             payload=build_cli_guidance_payload(
                 AMBIGUOUS_ORG_REASON_CODE,
                 user_message="当前 `--org-name` 命中了多个组织，请改用更精确的名称。",
-                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试；匹配成功后会写入 `.env` 并创建。",
+                action_hint="请从 candidate_orgs 中选择正确组织后，用准确的 `--org-name <selected-name>` 重试。",
                 org_name=org_name,
                 candidate_orgs=matches[:10],
             ),
         )
     selected = dict(matches[0])
-    selected_org_id = _org_id(selected)
-    if persist:
-        persist_selected_org(selected_org_id)
     return _build_org_context(selected, accessible_orgs)
 
 
 def resolve_create_org_context(
     args: argparse.Namespace,
     *,
-    persist_org_name: bool = False,
     ensure_selected_org_context: Callable[[], dict[str, Any]],
     list_accessible_orgs: Callable[[], list[dict[str, Any]]],
-    persist_selected_org: Callable[[str], Any],
 ) -> dict[str, Any]:
     requested_org_id = str(getattr(args, "org_id", None) or "").strip()
     requested_org_name = str(getattr(args, "org_name", None) or "").strip()
@@ -144,9 +137,7 @@ def resolve_create_org_context(
     if requested_org_name:
         return _resolve_org_name_context(
             requested_org_name,
-            persist=persist_org_name,
             list_accessible_orgs=list_accessible_orgs,
-            persist_selected_org=persist_selected_org,
         )
     return ensure_selected_org_context()
 

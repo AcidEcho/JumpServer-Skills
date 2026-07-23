@@ -34,7 +34,6 @@ from jumpserver_common.jms_runtime import (  # noqa: E402
     org_id_from_context,
     org_context_output,
     parse_strict_bool,
-    persist_selected_org,
     run_and_print,
 )
 
@@ -67,13 +66,11 @@ def _group_payload(values: list[str] | None) -> list[dict[str, str]]:
     return [{"pk": item} for item in _append_values(values)]
 
 
-def _resolve_create_org_context(args: argparse.Namespace, *, persist_org_name: bool = False) -> dict[str, Any]:
+def _resolve_create_org_context(args: argparse.Namespace) -> dict[str, Any]:
     return resolve_create_org_context(
         args,
-        persist_org_name=persist_org_name,
         ensure_selected_org_context=ensure_selected_org_context,
         list_accessible_orgs=list_accessible_orgs,
-        persist_selected_org=persist_selected_org,
     )
 
 
@@ -367,7 +364,7 @@ def _create_user(args: argparse.Namespace):
             **org_context_output(org_context),
         }
 
-    org_context = _resolve_create_org_context(args, persist_org_name=True)
+    org_context = _resolve_create_org_context(args)
     client = create_client(org_id=org_id_from_context(org_context))
     payload = _resolve_create_user_references(client, payload)
     created = client.post(CREATE_USER_PATH, json_body=payload)
@@ -409,7 +406,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_user.add_argument("--org-role", dest="org_role", action="append")
     create_user.add_argument("--group", action="append", help="用户组 ID 或精确名称；通过多个 --group 添加多个用户组。")
     create_user.add_argument("--org-id", dest="org_id", help="组织 ID；未传时使用 .env 中的 JMS_ORG_ID。")
-    create_user.add_argument("--org-name", dest="org_name", help="组织名称；--confirm 且唯一匹配时会写入 .env JMS_ORG_ID。")
+    create_user.add_argument("--org-name", dest="org_name", help="组织名称；仅限定本次命令，不写入 .env。")
     create_user.add_argument("--confirm", action="store_true")
     create_user.add_argument("--payload", help="JSON 对象 payload；显式参数会覆盖同名字段。")
     add_filter_arguments(create_user)

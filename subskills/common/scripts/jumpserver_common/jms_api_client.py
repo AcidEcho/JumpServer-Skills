@@ -22,6 +22,8 @@ from .jms_types import JumpServerAPIError
 
 
 AUTHENTICATION_TOKEN_PATH = "/api/v1/authentication/auth/"
+MAX_PAGINATION_PAGES = 1000
+MAX_PAGINATION_RECORDS = 100000
 
 
 class JumpServerClient(object):
@@ -41,12 +43,34 @@ class JumpServerClient(object):
         results = []
         next_ref = path
         next_params = dict(params or {})
+        page_count = 0
+        seen_request_refs = set()
         seen_list_page_signatures = set()
+        seen_dict_page_signatures = set()
 
         while next_ref:
+            if page_count >= MAX_PAGINATION_PAGES:
+                raise self._pagination_error(
+                    "Pagination page budget exceeded.",
+                    next_ref,
+                    page_count=page_count,
+                    record_count=len(results),
+                )
             request_ref = next_ref
             request_params = dict(next_params or {})
+            normalized_request_ref = self._absolute_url(
+                self._request_ref(request_ref, request_params)
+            )
+            if normalized_request_ref in seen_request_refs:
+                raise self._pagination_error(
+                    "Pagination returned a repeated page reference.",
+                    request_ref,
+                    page_count=page_count,
+                    record_count=len(results),
+                )
+            seen_request_refs.add(normalized_request_ref)
             payload = self.get(request_ref, params=request_params or None)
+            page_count += 1
             next_params = None
 
             if isinstance(payload, list):
@@ -55,8 +79,19 @@ class JumpServerClient(object):
                     break
                 page_signature = self._page_signature(page_records)
                 if page_signature in seen_list_page_signatures:
-                    break
+                    raise self._pagination_error(
+                        "Pagination returned a repeated page.",
+                        request_ref,
+                        page_count=page_count,
+                        record_count=len(results),
+                    )
                 seen_list_page_signatures.add(page_signature)
+                self._check_record_budget(
+                    results,
+                    page_records,
+                    request_ref,
+                    page_count=page_count,
+                )
                 results.extend(page_records)
                 page_limit = self._page_limit(payload, request_params, page_records)
                 if len(page_records) < page_limit:
@@ -65,15 +100,38 @@ class JumpServerClient(object):
                 continue
             if isinstance(payload, dict) and isinstance(payload.get("results"), list):
                 page_records = payload.get("results") or []
-                results.extend(page_records)
                 if not page_records:
                     break
+                page_signature = self._page_signature(page_records)
+                if page_signature in seen_dict_page_signatures:
+                    raise self._pagination_error(
+                        "Pagination returned a repeated page.",
+                        request_ref,
+                        page_count=page_count,
+                        record_count=len(results),
+                    )
+                seen_dict_page_signatures.add(page_signature)
+                total_count = self._total_count(payload)
+                if total_count is not None and total_count > MAX_PAGINATION_RECORDS:
+                    raise self._pagination_error(
+                        "Pagination record budget exceeded by the declared result count.",
+                        request_ref,
+                        page_count=page_count,
+                        record_count=len(results),
+                        declared_count=total_count,
+                    )
+                self._check_record_budget(
+                    results,
+                    page_records,
+                    request_ref,
+                    page_count=page_count,
+                )
+                results.extend(page_records)
                 next_ref = payload.get("next")
                 if next_ref:
                     continue
                 page_limit = self._page_limit(payload, request_params, page_records)
                 current_offset = self._current_offset(request_ref, request_params)
-                total_count = self._total_count(payload)
                 if total_count is not None and current_offset + len(page_records) >= total_count:
                     break
                 if len(page_records) < page_limit:
@@ -83,6 +141,25 @@ class JumpServerClient(object):
             return payload
 
         return results
+
+    def _pagination_error(self, message, path, **details):
+        return JumpServerAPIError(
+            message,
+            method="GET",
+            path=self._signed_path(self._absolute_url(path)),
+            details=details,
+        )
+
+    def _check_record_budget(self, results, page_records, path, *, page_count):
+        next_count = len(results) + len(page_records)
+        if next_count > MAX_PAGINATION_RECORDS:
+            raise self._pagination_error(
+                "Pagination record budget exceeded.",
+                path,
+                page_count=page_count,
+                record_count=len(results),
+                next_record_count=next_count,
+            )
 
     def _page_signature(self, page_records):
         try:
@@ -209,6 +286,7 @@ class JumpServerClient(object):
                 prepared,
                 verify=self.config.verify_tls,
                 timeout=self.timeout,
+                allow_redirects=False,
             )
         except requests.RequestException as exc:
             raise JumpServerAPIError(
@@ -318,11 +396,11 @@ class JumpServerClient(object):
         )
 
     def _decode_response(self, response, method, signed_path):
-        if response.status_code == 204 or not response.content:
+        if response.status_code == 204:
             return None
 
         parsed = self._response_payload(response)
-        if response.ok:
+        if 200 <= response.status_code < 300:
             return parsed
 
         message = "JumpServer API request failed"

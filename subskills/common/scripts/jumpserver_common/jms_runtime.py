@@ -20,12 +20,13 @@ import argparse
 import json
 import os
 import re
+import shlex
 import stat
 import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
@@ -1187,6 +1188,43 @@ def current_nonsecret_view(values: dict[str, str] | None = None) -> dict[str, st
     return {key: payload[key] for key in NONSECRET_ENV_KEYS if key in payload and payload[key] != ""}
 
 
+def normalize_relative_time_window(
+    *,
+    days: Any,
+    date_from: Any,
+    date_to: Any,
+    now: datetime,
+    default_days: int,
+) -> tuple[datetime | None, datetime | None]:
+    """Resolve an explicit or default relative window without overriding --days."""
+    if date_from not in {None, ""} or date_to not in {None, ""}:
+        return None, None
+    effective_days = default_days if days in {None, ""} else days
+    try:
+        day_count = int(effective_days)
+    except (TypeError, ValueError):
+        raise CLIError(
+            "Invalid days value.",
+            payload=build_cli_guidance_payload(
+                "invalid_days_value",
+                user_message="`days` 必须是正整数。",
+                action_hint="请使用例如 `--days 7` 的正整数后重试。",
+                invalid_value=days,
+            ),
+        )
+    if day_count <= 0:
+        raise CLIError(
+            "Invalid days value.",
+            payload=build_cli_guidance_payload(
+                "invalid_days_value",
+                user_message="`days` 必须大于 0。",
+                action_hint="请使用例如 `--days 7` 的正整数后重试。",
+                invalid_value=days,
+            ),
+        )
+    return now - timedelta(days=day_count), now
+
+
 def get_config_status(path: Path | None = None) -> dict[str, Any]:
     env_path = Path(path or LOCAL_ENV_FILE)
     return _build_config_status(
@@ -1347,7 +1385,7 @@ def reject_deprecated_pagination_cli_args(
     suggested_commands: list[str] = []
     if cleaned_args:
         suggested_commands.append(
-            "python3 %s %s" % (_script_ref(script_name), " ".join(cleaned_args))
+            shlex.join(["python3", _script_ref(script_name)] + cleaned_args)
         )
     for item in (usage_examples_by_command or {}).get(command, []):
         if item not in suggested_commands:
@@ -1863,7 +1901,6 @@ def resolve_effective_org_context(*, auto_select: bool = True) -> dict[str, Any]
         }
 
     if reserved_auto_select_eligible and auto_select:
-        persist_selected_org(DEFAULT_ORG_ID)
         auto_selected = dict(by_id.get(DEFAULT_ORG_ID) or {"id": DEFAULT_ORG_ID, "name": "Default"})
         auto_selected["source"] = "reserved_auto_select"
         switchable_orgs = _switchable_orgs(accessible_orgs, auto_selected)

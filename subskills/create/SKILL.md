@@ -45,7 +45,7 @@ JumpServer create 子 Skill 只允许使用正式入口脚本创建对象，不�
 | `--org-id` / `--org-name` | 只覆盖本次命令；两者不能同时传 |
 | 未传组织 | 使用 `.env JMS_ORG_ID` 当前组织 |
 | `--org-name` 未匹配或多匹配 | 返回 `candidate_orgs`，不写 `.env`，不创建 |
-| `create-user`、`create-user-group` 的 `--org-name --confirm` | 唯一匹配后写入 `.env JMS_ORG_ID`，再按该组织创建 |
+| `create-user`、`create-user-group` 的 `--org-name --confirm` | 唯一匹配后仅限本次命令，不写 `.env` |
 | `create-organization` | 请求不带 `X-JMS-ORG`，成功后不切换 `.env JMS_ORG_ID` |
 | `create-login-acl`、`create-connect-method-acl` | 只能在全局组织 ID `00000000-0000-0000-0000-000000000000` 下创建，且不写 `.env` |
 | 其他业务 create 命令 | 禁止使用全局组织 |

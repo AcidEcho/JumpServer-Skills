@@ -133,7 +133,7 @@ Natural-language time is normalized before entering the formal entrypoint:
 | `this month` | first day of this month `00:00:00` to current date or month end `23:59:59` |
 | `2026-03-10 to 2026-03-24`, `March 10 to March 24` | start day `00:00:00` to end day `23:59:59` |
 
-The formal entrypoint ultimately uses `--date`, `--period`, or `--date-from/--date-to`. Reports are written to `reports/JumpServer-YYYY-MM-DD.html`; on success, the response first says "report generated", then returns the report path, file existence/size, template path, field metadata path, time range, organization, and `validation_summary`. A short summary can only supplement these report artifacts, not replace them.
+The formal entrypoint ultimately uses `--date`, `--period`, or `--date-from/--date-to`. The Skill writes its analysis from `summary_input` and carries the prepare response's `report_binding` unchanged into the summary JSON. Reports are written to `reports/JumpServer-YYYY-MM-DD-<context-id>-<run-id>.html`; on success, the response first says "report generated", then returns the report path, file existence/size, template path, field metadata path, time range, organization, and `validation_summary`. A short summary can only supplement these report artifacts, not replace them.
 
 ## Organization Selection and Blocking Rules
 
@@ -145,7 +145,7 @@ The current organization is stored in `.env` as `JMS_ORG_ID`. When a business re
 | Ordinary query with explicit organization | Resolve the organization ID first, then run under that organization | no, command-scoped only |
 | Ordinary query without explicit organization | Use `.env JMS_ORG_ID` | no additional write |
 | Usage report without explicit organization | Default to Global organization `00000000-0000-0000-0000-000000000000` | no |
-| Usage report with explicit organization and successful match | Generate the report under the specified organization | yes |
+| Usage report with explicit organization and successful match | Generate the report under the specified organization | no, report-scoped only |
 | Create command | Follow the [write-operation allowlist](./references/routing-and-safety.md) and [create index](./subskills/create/references/index.md) | depends on the command |
 
 Create organization rules are not repeated in full in this README. The boundaries to remember are: most create commands treat explicit organization as command-scoped; when no organization is passed, some commands use `.env JMS_ORG_ID`; create commands that need a target organization usually block Global organization; `create-login-acl` and `create-connect-method-acl` must run in Global organization; `create-organization` sends no `X-JMS-ORG` and does not switch the current organization after success.

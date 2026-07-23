@@ -24,7 +24,7 @@ python3 subskills/create/scripts/jms_create_user.py create-user ...
 - 未传组织时使用 `.env JMS_ORG_ID` 当前组织。
 - 可传 `--org-id <org-id>` 指定创建所在组织；只覆盖本次命令，不写 `.env`。
 - 可传 `--org-name <name>` 指定组织名称；`--confirm` 时查询当前 AK/SK 可访问组织。
-- `--org-name --confirm` 唯一匹配后写入 `.env JMS_ORG_ID=<matched-id>`，再按该组织创建。
+- `--org-name --confirm` 唯一匹配后仅限定本次命令，不写 `.env`。
 - `--org-name` 未匹配时返回 `reason_code=organization_not_accessible`、`org_name`、`candidate_orgs`。
 - `--org-name` 多匹配时返回 `reason_code=ambiguous_organization`、`org_name`、命中的 `candidate_orgs`。
 - 组织名失败时不写 `.env`，不创建；从 `candidate_orgs` 选择准确组织名后，用 `--org-name <selected-name> --confirm` 重试。

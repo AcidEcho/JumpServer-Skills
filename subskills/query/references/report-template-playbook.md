@@ -47,15 +47,15 @@ python3 subskills/query/scripts/jms_report.py daily-usage-prepare \
   --org-id 00000000-0000-0000-0000-000000000000
 
 python3 subskills/query/scripts/jms_report.py daily-usage-render \
-  --prepared-path reports/prepared/JumpServer-2026-03-10.prepared.json \
+  --prepared-path '<daily-usage-prepare 返回的 prepared_path>' \
   --summary-file /tmp/jms-summary.json
 ```
 
-生成的 HTML 会固定写入 skill 根目录下的 `reports/JumpServer-YYYY-MM-DD.html`。
+生成的 prepared 和 HTML 文件名均包含组织/时间窗上下文标识与 run ID，格式为 `JumpServer-YYYY-MM-DD-<context-id>-<run-id>.*`；必须使用入口返回的实际路径，不得自行拼接。
 `daily-usage-render` 只有在最终 HTML 生成成功且运行时校验通过后，才会自动删除 `reports/prepared/` 下由正式入口生成的 prepared JSON；Skill summary JSON 默认保留。显式追加 `--cleanup-intermediates` 时，只清理临时目录中名为 `jms-summary*.json` 的摘要文件；失败时保留全部中间文件用于排查。
 
 不要每次请求都现场写临时拼装逻辑。报告类请求必须优先走正式入口；若正式入口缺失，应先补齐正式入口，再使用它。
-`risk_login_analysis`、`risk_command_analysis`、`risk_transfer_analysis`、`high_risk_operation_analysis`、`risk_action`、`command_summary`、`command_compliance_analysis`、`file_transfer_summary` 必须由 Skill 根据 `summary_input` 总结后写入摘要 JSON，脚本不得生成这些字段的兜底文案。
+`risk_login_analysis`、`risk_command_analysis`、`risk_transfer_analysis`、`high_risk_operation_analysis`、`risk_action`、`command_summary`、`command_compliance_analysis`、`file_transfer_summary` 必须由 Skill 根据 `summary_input` 总结后写入摘要 JSON，脚本不得生成这些字段的兜底文案。摘要 JSON 还必须原样携带 prepare 返回的 `report_binding`，render 会校验 `context_id` 和 `prepared_sha256`，防止跨组织或跨时间窗串档。
 
 ## 组织优先级
 
@@ -64,10 +64,10 @@ python3 subskills/query/scripts/jms_report.py daily-usage-render \
 1. 用户显式给组织 -> 按用户指定组织执行
 2. 用户显式说“所有组织”或“全局组织” -> 视为全局组织 `00000000-0000-0000-0000-000000000000`
 3. 用户未显式给组织 -> 默认使用全局组织 `00000000-0000-0000-0000-000000000000`，不写 `.env JMS_ORG_ID`
-4. 用户显式给 `--org-id` 或 `--org-name` 且匹配成功 -> 使用对应组织 ID，并写入 `.env JMS_ORG_ID`
+4. 用户显式给 `--org-id` 或 `--org-name` 且匹配成功 -> 使用对应组织 ID，仅限本次报告，不写 `.env JMS_ORG_ID`
 5. 显式组织未匹配或多匹配 -> 阻塞并返回 `candidate_orgs`
 
-如果用户明确指定某个组织，则查询该组织下的数据，并把对应组织 ID 写入 `.env JMS_ORG_ID`。
+如果用户明确指定某个组织，则仅在本次报告中查询该组织下的数据，不改变 `.env JMS_ORG_ID`。
 
 ## 时间范围归一化
 

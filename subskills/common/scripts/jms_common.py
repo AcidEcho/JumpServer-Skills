@@ -14,6 +14,7 @@ from jumpserver_common.jms_bootstrap import ensure_requirements_installed
 
 ensure_requirements_installed()
 
+from jumpserver_common.jms_discovery import CORE_ENDPOINTS
 from jumpserver_common.jms_text_utils import (
     exact_first_filter as _exact_first_filter,
     lower_text as _lower,
@@ -48,6 +49,7 @@ SELECT_ORG_REASON_CODE = "organization_not_accessible"
 AMBIGUOUS_ORG_REASON_CODE = "ambiguous_organization"
 MISSING_ENDPOINT_PATH_REASON_CODE = "missing_endpoint_path"
 UNSUPPORTED_VERIFICATION_METHOD_REASON_CODE = "unsupported_verification_method"
+ENDPOINT_NOT_ALLOWLISTED_REASON_CODE = "endpoint_not_allowlisted"
 
 SELECT_ORG_EXAMPLES = [
     "python3 subskills/common/scripts/jms_common.py select-org",
@@ -208,8 +210,6 @@ def _endpoint_inventory(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _endpoint_verify(args: argparse.Namespace) -> dict[str, Any]:
-    org_context = ensure_selected_org_context()
-    client = create_client(org_id=org_id_from_context(org_context))
     filters = merge_filter_args(
         args,
         usage_examples=[
@@ -229,8 +229,24 @@ def _endpoint_verify(args: argparse.Namespace) -> dict[str, Any]:
                 ],
             ),
         )
+    allowed_paths = frozenset(CORE_ENDPOINTS.values())
+    if path not in allowed_paths:
+        raise CLIError(
+            "端点不在允许清单中。",
+            payload=build_cli_guidance_payload(
+                ENDPOINT_NOT_ALLOWLISTED_REASON_CODE,
+                user_message="`endpoint-verify` 只允许验证 endpoint inventory 中登记的核心端点。",
+                action_hint="请先执行 `endpoint-inventory`，再从返回的 endpoints 中选择完整 path。",
+                suggested_commands=[
+                    "python3 subskills/common/scripts/jms_common.py endpoint-inventory",
+                ],
+                path=path,
+            ),
+        )
     method = str(args.method or filters.get("method") or "GET").strip().upper()
     params = filters.get("params") if isinstance(filters.get("params"), dict) else None
+    org_context = ensure_selected_org_context()
+    client = create_client(org_id=org_id_from_context(org_context))
     if method == "OPTIONS":
         payload = client.options(path, params=params)
     elif method == "GET":

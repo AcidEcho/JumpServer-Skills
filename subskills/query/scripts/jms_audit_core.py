@@ -23,6 +23,7 @@ from jumpserver_common.jms_runtime import (
     is_uuid_like,
     org_id_from_context,
     org_context_output,
+    normalize_relative_time_window,
     parse_bool,
     parse_strict_bool,
 )
@@ -1077,12 +1078,13 @@ def _normalize_time_filters(filters: dict[str, Any], *, default_days: int = 7) -
     days = payload.get("days")
     date_from_dt = None
     date_to_dt = None
-    if days not in {None, ""} and not date_from and not date_to:
-        date_from_dt = now - timedelta(days=int(days))
-        date_to_dt = now
-    if not date_from and not date_to:
-        date_from_dt = now - timedelta(days=default_days)
-        date_to_dt = now
+    date_from_dt, date_to_dt = normalize_relative_time_window(
+        days=days,
+        date_from=date_from,
+        date_to=date_to,
+        now=now,
+        default_days=default_days,
+    )
     if date_from_dt is None and date_from not in {None, ""}:
         date_from_dt = _parse_filter_datetime_value(date_from, end_of_day=False)
     if date_to_dt is None and date_to not in {None, ""}:
