@@ -7,6 +7,8 @@ description: Reserved JumpServer update-operation subskill. Use when a user asks
 
 更新类能力预留在本子 Skill。本版没有开放任何业务更新入口。
 
+若本目录被独立注册，使用 [agents/openai.yaml](agents/openai.yaml)。独立注册不扩大权限，本版仍只负责阻塞更新请求。
+
 ## 输入 / 输出
 
 | 项 | 内容 |

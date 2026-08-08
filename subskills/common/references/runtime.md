@@ -2,7 +2,7 @@
 
 ## 快速概览
 
-- 这份文档是所有 `common / query / create / update` 请求的统一预检入口。
+- 这份文档是所有 `common / access / query / create / update` 请求的统一预检入口。
 - 面向用户的正式业务入口固定为 `subskills/*/scripts/jms_*.py`；同目录下其余 `jms_*.py` 文件是公共运行时/请求/发现/聚合模块，不作为独立业务入口。
 - 首次运行任一正式入口时，脚本会先按当前解释器环境自动检查 `requirements.txt` 中的依赖；缺失时自动安装，再执行 `python3 subskills/common/scripts/jms_common.py config-status --json` 检查本地配置是否完整。
 - 若配置不完整，按固定顺序对话收集 `JMS_API_URL -> (JMS_ACCESS_KEY_ID + JMS_ACCESS_KEY_SECRET 或 JMS_USERNAME + JMS_PASSWORD) -> JMS_TIMEOUT -> JMS_VERIFY_TLS`，回显脱敏摘要后执行 `config-write --confirm` 生成本地 `.env`。
@@ -105,7 +105,7 @@ python3 subskills/common/scripts/jms_common.py ping
 |---|---|
 | 普通业务未传组织 | 使用 `.env JMS_ORG_ID` 当前组织 |
 | 报告未传组织 | 默认使用全局组织 `00000000-0000-0000-0000-000000000000`，不写 `.env JMS_ORG_ID` |
-| 报告显式传组织名或组织 ID | 使用对应组织 ID，并写入 `.env JMS_ORG_ID` |
+| 报告显式传组织名或组织 ID | 使用对应组织 ID，仅限本次报告，不写入 `.env JMS_ORG_ID` |
 | 普通业务显式传组织名 | 先用 `select-org` 或组织查询解析成组织 ID，再传业务脚本 |
 | 普通业务显式传组织 ID | 本次命令通过 `X-JMS-ORG` 请求头临时限定组织 |
 | 多组织且未选择当前组织 | 返回 `candidate_orgs`，要求先执行 `select-org --confirm` |

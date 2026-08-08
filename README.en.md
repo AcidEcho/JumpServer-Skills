@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, template-based usage reports, and controlled object creation. Users do not need to manually compose script commands; apart from allowlisted create entrypoints, server-side capabilities remain non-destructive reads, and create output automatically redacts secret fields.
+`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, current-identity one-time SSH connections, template-based usage reports, and controlled object creation. Users do not need to manually compose script commands. Persistent business writes remain limited to allowlisted create entrypoints; Access may create only a short-lived, non-reusable connection token after explicit confirmation, and create output redacts secret fields automatically.
 
 [中文](./README.md)
 
@@ -18,10 +18,11 @@ For first-time use, the natural-language `.env` generation path is usually faste
 |---|---|---|---|
 | Environment preflight and organization selection | “Check whether the configuration works”, “test connectivity”, “switch to the Default organization” | `jms_common.py` | Confirms `.env`, authentication, organization, and endpoint first; local writes are limited to `.env`, `.env.lock`, and `.env.recovery-*` recovery files |
 | Object lookup | "Find this asset/user/account/node/label", "show details for this platform" | `jms_query.py` / `jms_runtime_query.py` | Returns object lists, details, or candidates; asks the user to confirm when an object is ambiguous |
-| User effective access scope | "Which assets/nodes can this user access?", "which accounts and protocols can this user use on this asset?" | `jms_access.py` | Returns effective access results first instead of expanding permission-rule reasoning by default |
+| User effective access | "Which assets/nodes/accounts/protocols can this user access?" | Query: `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | Returns effective access and never creates a connection token |
+| Current-identity one-time SSH | "Connect to this host through JumpServer" | Access: `subskills/access/scripts/jms_ssh_connect.py connect-info` | Requires a unique asset/managed account and explicit `--confirm`, with a non-reusable token |
 | Permission relationship readback | "Who is this asset authorized to?", "why can this user access it?", "show details for this permission rule" | `jms_permissions.py` | Keeps authorization subjects, actual access users, and super-admin impact separate |
 | Audit investigation | "Who failed to log in yesterday?", "query a user's sessions/commands/file transfers", "analyze high-risk commands" | `jms_audit.py` | Queries logs, records, details, or aggregate results under an explicit organization and time window |
-| Governance inspection and access analysis | "Run asset governance inspection", "analyze account risk", "show access rankings/abnormal behavior" | `jms_inspect.py` / `jms_audit.py` | Uses built-in capability aggregation instead of making users stitch together scattered queries |
+| Governance inspection and access analysis | "Run asset governance inspection", "show component load", "analyze password-change failures", "show access rankings/abnormal behavior" | `jms_inspect.py` / `jms_audit.py` | Uses built-in capability aggregation instead of making users stitch together scattered queries |
 | Usage reports | "Generate a daily report", "analyze bastion usage on 2026-03-10", "show a usage overview for this time range" | `jms_report.py` | Generates a complete HTML report by default and returns the report path, time window, organization, and validation summary |
 | Controlled creation | "Create a user/org/label/node/asset/zone/gateway/account template/permission rule/ACL/masking rule" | [create entrypoint index](./subskills/create/references/index.md) | Only allowlisted create entrypoints are open; without `--confirm` only previews, with `--confirm` creates; secret fields are redacted |
 
@@ -49,6 +50,8 @@ Help me initialize JumpServer config. I log in with username and password, and I
 ```
 
 2. Connect this skill to your agent or Codex environment. [agents/openai.yaml](./agents/openai.yaml) provides a ready-to-use skill integration description that can be used as a reference or registration entrypoint.
+
+If the host can register only one subskill, use `subskills/common|access|query|create|update/agents/openai.yaml`. Access is an optional standalone entrypoint. See [standalone subskill registration](./references/subskill-registration.md) for cwd and full-repository requirements.
 
 3. Describe requests directly in natural language. You do not need to manually compose script commands. For example: "Which assets can this user access in the Default organization?", "Show me yesterday's usage", or "Show details for this permission rule."
 
@@ -95,11 +98,12 @@ Environment variable rules:
 | Scenario | You Can Ask | Automatic Route |
 |---|---|---|
 | Object lookup | "Show details for user `Demo-User`", "show which assets are under node `Demo-Node`", "show available assets on the `Linux` platform" | `jms_query.py` |
-| User effective access scope | "Which assets can this user access in the Default organization?", "which nodes can this user access?", "which accounts and protocols can this user use on this asset?" | `jms_access.py` |
+| User effective access scope | "Which assets can this user access in the Default organization?", "which nodes can this user access?", "which accounts and protocols can this user use on this asset?" | Query: `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` |
+| Current-identity one-time SSH | "Connect to 10.1.1.1 through JumpServer", "get SSH information for this host before deployment" | Access: `subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` |
 | Permission relationship readback | "Who is this asset authorized to?", "why can this user access this asset?", "show details for this permission rule" | `jms_permissions.py` |
 | Audit investigation | "Query login audit for the last week", "show a user's session records and abnormal interruptions", "export command records for a specific day" | `jms_audit.py` |
 | Usage reports | "Show me yesterday's usage", "show who logged in most last week", "check which assets were most active in early March" | `jms_report.py` |
-| Governance inspection | "Run an asset governance inspection", "analyze account risk", "show recent access anomalies" | `jms_inspect.py` |
+| Governance inspection | "Run an asset governance inspection", "show component CPU/memory load", "analyze password-change failures over the last 30 days" | `jms_inspect.py` |
 | Controlled creation | "Create a user", "create a node", "create a host asset", "create an asset permission rule", "create a data masking rule" | create subskill, see the [create index](./subskills/create/references/index.md) |
 
 Ambiguous request wording is handled by these rules:
@@ -107,6 +111,7 @@ Ambiguous request wording is handled by these rules:
 | Wording Pattern | Classification |
 |---|---|
 | "Which assets / nodes / accounts / protocols can this user access?" | User effective access scope, returning result lists |
+| "Connect to this host / log in through JumpServer / get one-time SSH information" | Current API identity SSH connection; never issues a token for another user |
 | "Why can this user access it? / permission rule details / authorization basis" | Permission relationship readback, explaining authorization sources |
 | "Who is this asset authorized to? / who is authorized to this asset?" | Answers authorization subjects by default and does not include super admins by default |
 | "Login situation on a day / session overview / who had the most / which were most active" | Usage report or usage analysis |
@@ -157,6 +162,7 @@ In these cases, the skill blocks instead of continuing by guessing:
 | Configuration or authentication is incomplete | Complete `.env` or run preflight first |
 | Object name is duplicated, platform is unclear, or organization is unclear | Return candidates and ask the user to confirm |
 | Query results cross organizations, or the current organization differs from the target object's organization | Require an explicit target organization |
+| SSH target asset, protocol, or managed-credential account is not unique | Return candidates or block without creating a connection token |
 | Multiple organizations are available and no current organization is selected | Return `candidate_orgs` and require organization selection first |
 | User tries to bypass formal entrypoints, skip preflight, or assemble temporary scripts | Block and require formal entrypoints |
 
@@ -166,17 +172,20 @@ In these cases, the skill blocks instead of continuing by guessing:
 |---|---|---|
 | How to integrate this skill | [SKILL.md](./SKILL.md), [agents/openai.yaml](./agents/openai.yaml) | Top-level routing, default prompt, response constraints |
 | Safety boundaries and allowlist | [references/routing-and-safety.md](./references/routing-and-safety.md) | Formal entrypoint boundaries, allowed write operations, global blocking rules |
-| How query, access, permission, audit, and inspection routing works | [subskills/query/references/routing-playbook.md](./subskills/query/references/routing-playbook.md), [capabilities.md](./subskills/query/references/capabilities.md) | Trigger words, capability catalog, blocking rules, counterexamples |
+| How query, effective-access, permission, audit, and inspection routing works | [intent-routing.md](./subskills/query/references/intent-routing.md), [routing-playbook.md](./subskills/query/references/routing-playbook.md), [capabilities.md](./subskills/query/references/capabilities.md) | Query intent classification, trigger words, capability catalog, blocking rules, counterexamples |
+| How Access one-time SSH creation and use works | [ssh-connection.md](./subskills/access/references/ssh-connection.md) | `connect-info`, `users/self`, confirmation gate, API flow, token lifecycle, and safety boundaries |
+| Component load and password-change failure analysis | [component-load-and-password-report.md](./subskills/query/references/component-load-and-password-report.md) | Metric fields, load thresholds, failure classification, and statistical scope |
 | How usage reports are generated | [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | Template report flow, time ranges, organization priority |
 | Object lookup, permission, and audit details | [assets.md](./subskills/query/references/assets.md), [permissions.md](./subskills/query/references/permissions.md), [audit.md](./subskills/query/references/audit.md), [diagnose.md](./subskills/query/references/diagnose.md) | Asset/account/user/node lookup, authorization relationships, log audit, governance diagnosis |
 | What create can create | [subskills/create/references/index.md](./subskills/create/references/index.md) | Create commands, entrypoint scripts, field-document index |
 | Runtime, preflight, and troubleshooting | [runtime.md](./subskills/common/references/runtime.md), [safety-rules.md](./subskills/common/references/safety-rules.md), [troubleshooting.md](./subskills/common/references/troubleshooting.md) | `.env`, organization selection, local-write boundary, common failure handling |
+| Standalone registration and extension | [subskill-registration.md](./references/subskill-registration.md), [ADD-SUBSKILL-GUIDE.md](./ADD-SUBSKILL-GUIDE.md) | Single-subskill integration, capability/command/domain extension, and acceptance checks |
 
 ## Unsupported Scope
 
 The following requests are not executed:
 
-- Server-side writes are only open to allowlisted create entrypoints. Object updates, deletion, unlocking, and non-allowlisted permission creation, changes, or removal are not executed. For the complete scope, see [`references/routing-and-safety.md`](./references/routing-and-safety.md).
+- Persistent server-side writes are only open to allowlisted create entrypoints; `connect-info --confirm` may also create an `is_reusable=false` short-lived token for the current identity. Object updates, deletion, unlocking, and non-allowlisted permission creation, changes, or removal are not executed. For the complete scope, see [`references/routing-and-safety.md`](./references/routing-and-safety.md).
 - Skipping preflight, bypassing formal entrypoints, or using temporary SDK/HTTP scripts for business actions.
 - Continuing by guessing when objects, organizations, or cross-organization relationships are unclear.
 - Bypassing `jms_report.py` for report requests and replacing it with ad hoc assembly logic.

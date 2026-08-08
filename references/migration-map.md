@@ -2,7 +2,7 @@
 
 ## 当前结构摘要
 
-- 维持主 Skill + 子 Skill 的分域心智模型：`common / query / create / update`。
+- 维持主 Skill + 子 Skill 的分域心智模型：`common / access / query / create / update`。
 - 把底层执行统一收口到 `subskills/*/scripts/`，不让请求入口散落在顶层或依赖临时 SDK 包装。
 - 把“查询类能力”组织成 `capability` 能力单元，便于技能路由、意图识别和跨环境复用。
 - 把运行时、能力元数据、统计聚合、对象查询、权限回看分层拆开，避免把 CLI 入口、业务逻辑和底层请求耦合在一起。
@@ -14,7 +14,8 @@
 |---|---|---|
 | `subskills/common/scripts/jumpserver_common/` | 环境加载、组织上下文、客户端构建、公共 CLI 行为 | 所有正式入口共享 |
 | `subskills/query/scripts/jms_query.py` | 资产、平台、节点、账号、账号模板、用户、用户组、组织、标签、网域查询 | 按对象域集中只读查询 |
-| `subskills/query/scripts/jms_access.py` | 用户资产、节点、账号、协议有效访问范围 | 不回退成授权规则说明 |
+| `subskills/query/scripts/jms_access.py` | 用户资产、节点、账号、协议有效访问范围 | Query 正式实现源；保留 `user-assets`、`user-nodes`、`user-asset-access`，不创建 connection token |
+| `subskills/access/scripts/jms_ssh_connect.py` | 当前身份一次性 SSH 连接信息 | Access 只提供 `connect-info`；与 Query 零代码依赖，双方只共享 Common |
 | `subskills/query/scripts/jms_permissions.py` | 授权规则、ACL、RBAC 与资产授权用户查询 | 不承担授权写入 |
 | `subskills/query/scripts/jms_audit.py` | 审计列表、详情、terminal 会话、命令存储提示、能力分析 | 统一承接调查类意图 |
 | `subskills/common/scripts/jms_common.py` | 配置检查、预检、连通性、组织选择、端点验证 | 所有业务 skill 的公共前置能力 |
@@ -59,10 +60,11 @@
 | 账号活跃分析 | `account-activity-overview`、`long-time-unused-accounts`、`frequent-operation-user-ranking` | `jms_inspect.py inspect`、`jms_audit.py audit-analyze` | 适用于查看账号使用热度、长期未使用账号、高频操作用户和最近活跃线索 |
 | 资产治理 | `uncategorized-assets-query`、`assets-without-valid-account-template`、`duplicate-asset-name-query`、`offline-disabled-assets-statistics`、`long-time-unlogged-assets`、`long-time-unused-assets`、`node-asset-distribution` | `jms_inspect.py inspect` | 适用于资产分类治理、模板治理、离线禁用统计、未使用资产和节点分布分析 |
 | 账号治理 | `account-list-query`、`expired-account-query`、`accounts-without-template`、`account-asset-bindings`、`account-template-list` | `jms_inspect.py inspect` | 适用于账号清单查询、失效账号排查、未绑定模板账号治理、账号-资产绑定关系查看和模板清单查看 |
-| 对象解析与访问分析 | `resolve`、`resolve-platform`、`user-assets`、`user-nodes`、`user-asset-access` | `jms_query.py`、`jms_runtime_query.py`、`jms_access.py` | 适用于名称歧义消解、平台解析、用户有效访问范围分析 |
+| 对象解析与访问分析 | `resolve`、`resolve-platform`、`user-assets`、`user-nodes`、`user-asset-access` | `jms_query.py`、`jms_runtime_query.py`、`subskills/query/scripts/jms_access.py` | 适用于名称歧义消解、平台解析、用户有效访问范围分析 |
 | 系统设置与配置巡检 | `system-settings-overview`、`security-policy-check`、`login-auth-config-check`、`mfa-config-check`、`auth-source-config-check`、`notification-config-check`、`ticket-approval-config-check`、`audit-retention-check`、`terminal-access-policy-check`、`settings-category`、`license-detail` | `jms_inspect.py inspect`、`jms_runtime_query.py` | 适用于查看系统总览、安全策略、认证源、MFA、通知、审批、审计保留、终端接入配置和许可证详情 |
 | 工单、终端组件与存储查询 | `tickets`、`terminals`、`command-storages`、`replay-storages` | `jms_runtime_query.py` | 适用于直接读取工单、终端组件、命令存储、录像存储原始记录 |
 | 报表与账号自动化查询 | `reports`、`report-query`、`account-automation-overview` | `jms_runtime_query.py`、`jms_inspect.py inspect` | 适用于读取报表接口、dashboard 数据以及账号备份/改密/风险/检测任务概览 |
+| 组件负载与改密失败分析 | `component-load-overview`、`change-password-failure-report` | `jms_inspect.py inspect` | 适用于组件 CPU/内存/磁盘/会话负载巡检，以及按时间窗统计改密失败率、错误类型和失败对象排行 |
 | 组织与授权关系统计 | `org-resource-overview`、`role-binding-overview`、`endpoint-inventory`、`endpoint-verify` | `jms_inspect.py inspect`、`jms_common.py` | 适用于组织资源盘点、节点数量、RBAC 绑定关系、核心端点 inventory 与按路径验证 |
 | 可疑行为聚合调查 | `suspicious-operation-summary` | `jms_audit.py audit-analyze` | 适用于跨命令、登录、会话、文件传输多接口汇总可疑行为 |
 | 各 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则） | 见 [`subskills/create/references/index.md`](../subskills/create/references/index.md) | 同上 | 命令、入口脚本与每条命令的字段语义见 create 子 skill 的 reference 索引；写操作白名单与组织限制以 [`references/routing-and-safety.md`](routing-and-safety.md) 为唯一来源，本表不再重复 |

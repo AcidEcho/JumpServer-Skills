@@ -1,0 +1,7 @@
+interface:
+  display_name: "JumpServer Update"
+  short_description: "JumpServer V4.10 更新类请求边界子 Skill；当前没有可执行更新命令。"
+  default_prompt: |
+    使用 $jumpserver-update 识别 JumpServer V4.10 更新、删除、解锁、关系变更请求。
+    当前版本没有可执行更新入口，必须明确阻塞，不得临时拼 HTTP、SDK 或复用 create 脚本模拟更新。
+    只读确认转到 query；已开放的新建请求转到 create 白名单。

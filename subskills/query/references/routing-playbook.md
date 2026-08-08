@@ -38,6 +38,7 @@
 - “某某用户在 Default 组织下有哪些资产” -> 用户有效访问范围
 - “看这条授权规则详情” -> 权限关系
 - “查某某用户有哪些资产” -> 用户有效访问范围
+- “通过 JumpServer 连接 10.1.1.1” -> 离开 Query，转到 Access 的当前身份 SSH 连接
 - “分析 3 月上旬谁用资产最多” -> 报告/使用分析
 
 ## 典型触发词
@@ -82,6 +83,13 @@
 - `which assets can this user access` / `which nodes can this user access`
 - 这类结果型问法先走 `jms_access.py user-assets` / `user-nodes` / `user-asset-access`
 
+当前身份 SSH 连接是 Access 高信号，不在 Query 执行：
+
+- `连接这台机器` / `通过 JumpServer 登录` / `获取一次性 SSH 信息`
+- `先连接再部署` / `先取得 SSH 连接参数再执行远程任务`
+- `connect through JumpServer` / `get one-time SSH connection info`
+- 转到 `subskills/access/scripts/jms_ssh_connect.py connect-info`；Query 不创建 token，也不导入 Access
+
 权限关系高信号：
 
 - `授权规则` / `权限详情` / `ACL` / `RBAC`
@@ -122,6 +130,7 @@
 - `某某用户在 Default 组织下有哪些资产` -> 用户有效访问范围；优先在单次命令内用 `--org-id` / `--org-name` 限定目标组织，再查 `user-assets`
 - `某某用户有哪些节点` -> 用户有效访问范围；返回 `node_count` + `nodes`
 - `某某用户在某资产下有哪些账号` -> 用户有效访问范围；返回 `permed_accounts` + `permed_protocols`
+- `连接这台机器` / `通过 JumpServer 登录` / `先连接再部署` -> 离开 Query，转到 Access 的 `jms_ssh_connect.py connect-info`
 - `这台资产授权给了谁` / `谁被授权到这台资产` -> 权限关系；优先解析资产，再查 `asset-perm-users`
 - `为什么这台资产会被授权` / `节点授权是否覆盖这台资产` -> 权限关系 / 访问分析；优先 `asset-permission-explain`
 - `某某用户为什么能访问这台资产` -> 权限关系 / 访问分析；必要时 `user-asset-access` + `permission-get/list`
@@ -211,6 +220,8 @@
 - 有其他可切换组织时回显可切换组织（`switchable_orgs`）
 - 回显执行命令摘要
 - 返回 `asset_count` + `assets`，或 `node_count` + `nodes`，或 `permed_accounts` + `permed_protocols`
+
+当前身份 SSH 连接：只返回 Access 路由，不在 Query 内执行 `connect-info` 或创建 token；具体流程读取 [Access SSH 连接生命周期](../../access/references/ssh-connection.md)。
 
 普通查询：
 

@@ -85,6 +85,7 @@ SENSITIVE_FIELD_NAMES = frozenset(
         "token",
     }
 )
+ALLOWED_SENSITIVE_RESULT_PATHS = frozenset({("connection", "password")})
 WRITEABLE_ENV_KEYS = frozenset(ENV_KEYS)
 ENV_FORMAT_PREFIX = "# jumpserver-skills-env-format:"
 ENV_FORMAT_VERSION = 1
@@ -120,6 +121,7 @@ _GLOBAL_ORG_PROBE_RESULT: dict[str, Any] | None = None
 ENTRYPOINT_SCRIPT_REFS = {
     "jms_query.py": "subskills/query/scripts/jms_query.py",
     "jms_access.py": "subskills/query/scripts/jms_access.py",
+    "jms_ssh_connect.py": "subskills/access/scripts/jms_ssh_connect.py",
     "jms_permissions.py": "subskills/query/scripts/jms_permissions.py",
     "jms_audit.py": "subskills/query/scripts/jms_audit.py",
     "jms_inspect.py": "subskills/query/scripts/jms_inspect.py",
@@ -230,19 +232,48 @@ def _redact_sensitive_text(value: str) -> str:
     )
 
 
-def redact_sensitive(value: Any) -> Any:
+def redact_sensitive(
+    value: Any,
+    *,
+    allowed_paths: set[tuple[str, ...]] | frozenset[tuple[str, ...]] | None = None,
+    _path: tuple[str, ...] = (),
+) -> Any:
+    active_allowed_paths = frozenset(allowed_paths or ())
     if isinstance(value, dict):
         redacted = {}
         for key, item in value.items():
+            key_text = str(key)
+            item_path = (*_path, key_text)
             if _sensitive_field_name(key):
-                redacted[str(key)] = mask_secret(_redact_sensitive_text(str(item or "")))
+                if item_path in active_allowed_paths and not isinstance(item, (dict, list, tuple)):
+                    redacted[key_text] = item
+                else:
+                    redacted[key_text] = mask_secret(_redact_sensitive_text(str(item or "")))
             else:
-                redacted[str(key)] = redact_sensitive(item)
+                redacted[key_text] = redact_sensitive(
+                    item,
+                    allowed_paths=active_allowed_paths,
+                    _path=item_path,
+                )
         return redacted
     if isinstance(value, list):
-        return [redact_sensitive(item) for item in value]
+        return [
+            redact_sensitive(
+                item,
+                allowed_paths=active_allowed_paths,
+                _path=(*_path, str(index)),
+            )
+            for index, item in enumerate(value)
+        ]
     if isinstance(value, tuple):
-        return [redact_sensitive(item) for item in value]
+        return [
+            redact_sensitive(
+                item,
+                allowed_paths=active_allowed_paths,
+                _path=(*_path, str(index)),
+            )
+            for index, item in enumerate(value)
+        ]
     if isinstance(value, str):
         return _redact_sensitive_text(value)
     return value
@@ -1993,10 +2024,28 @@ def print_json(payload: dict[str, Any]) -> None:
     sys.stdout.write("\n")
 
 
-def run_and_print(func, args: argparse.Namespace | None = None) -> int:
+def run_and_print(
+    func,
+    args: argparse.Namespace | None = None,
+    *,
+    allowed_sensitive_result_paths: set[tuple[str, ...]] | frozenset[tuple[str, ...]] | None = None,
+) -> int:
     try:
         result = func(args) if args is not None else func()
-        print_json(redact_sensitive({"ok": True, "result": serialize(result)}))
+        requested_result_paths = {
+            tuple(str(part) for part in path)
+            for path in (allowed_sensitive_result_paths or ())
+        }
+        unsupported_paths = requested_result_paths - ALLOWED_SENSITIVE_RESULT_PATHS
+        if unsupported_paths:
+            raise ValueError("Unsupported sensitive result path allowlist.")
+        allowed_paths = {("result", *path) for path in requested_result_paths}
+        print_json(
+            redact_sensitive(
+                {"ok": True, "result": serialize(result)},
+                allowed_paths=allowed_paths,
+            )
+        )
         return 0
     except CLIError as exc:
         payload = {"ok": False, "error": redact_sensitive(str(exc))}

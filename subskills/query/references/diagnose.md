@@ -4,7 +4,7 @@
 
 - 主入口：`python3 subskills/common/scripts/jms_common.py <subcommand> ...`
 - 适合连通性检查、对象解析、系统设置直读、许可证读取、工单列表、终端组件/命令存储/录像存储查询、报表读取、账号自动化概览、核心端点 inventory 与按路径验证。
-- 用户有效访问范围走 `python3 subskills/query/scripts/jms_access.py ...`；最近审计走 `python3 subskills/query/scripts/jms_audit.py ...`；系统巡检与治理聚合走 `python3 subskills/query/scripts/jms_inspect.py inspect ...`。
+- 用户有效访问范围走 Query 的 `python3 subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access ...`；当前身份一次性 SSH 转到 Access 的 `connect-info`。最近审计走 `python3 subskills/query/scripts/jms_audit.py ...`；系统巡检与治理聚合走 `python3 subskills/query/scripts/jms_inspect.py inspect ...`。
 - `select-org` 是组织查看、解析和切换入口；带 `--confirm` 时写入 `.env JMS_ORG_ID`。
 - 正式入口未显式传组织时使用 `.env JMS_ORG_ID` 当前组织。
 - 统计与巡检类聚合请求优先用 `inspect --capability ...`；需要直连读取某类设置或系统对象时，再用专用子命令。
@@ -33,6 +33,8 @@
 | `terminals` | 查看终端组件列表 | 可选 `--name` / `--search` | 终端组件记录 |
 | `reports` | 读取报表与 dashboard | `--report-type` | 报表原始返回与摘要 |
 | `account-automations` | 汇总账号备份、改密、风险、检测任务 | 可选 `--days --search --top` | 自动化概览 |
+| `inspect --capability component-load-overview` | 看组件负载和高负载标记 | `--days` 或明确时间窗 | CPU/内存/磁盘/会话、指标覆盖和高负载组件数 |
+| `inspect --capability change-password-failure-report` | 分析改密失败 | 时间窗，可选用户/执行人/来源地址/状态 | 成功失败占比、错误类型与失败资产/用户 Top |
 | `endpoint-inventory` | 查看核心端点 inventory / OPTIONS 缓存 | 可选 `--refresh` | 端点清单与方法能力 |
 | `endpoint-verify` | 对单个端点做 GET/OPTIONS 验证 | `--path` | `method`、`path`、原始 payload |
 | `inspect` | 查询治理、统计、巡检能力单元 | `--capability` | 能力摘要、排行、样本 |
@@ -116,7 +118,11 @@ python3 subskills/query/scripts/jms_runtime_query.py reports --report-type accou
 python3 subskills/query/scripts/jms_runtime_query.py reports --report-type pam-dashboard --total-long-time-no-login-accounts --total-weak-password-accounts
 python3 subskills/query/scripts/jms_inspect.py inspect --capability hot-assets-ranking --days 30 --top 10
 python3 subskills/query/scripts/jms_inspect.py inspect --capability system-settings-overview
+python3 subskills/query/scripts/jms_inspect.py inspect --capability component-load-overview --days 1
+python3 subskills/query/scripts/jms_inspect.py inspect --capability change-password-failure-report --days 30
 ```
+
+组件负载阈值、字段回退和改密失败分类口径见 [组件负载与改密失败分析](component-load-and-password-report.md)。
 
 列表型和分析型命令默认会自动翻页，抓取并返回查询范围内的全部结果，不再支持 `--limit/--offset`。
 

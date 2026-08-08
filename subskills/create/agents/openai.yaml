@@ -1,0 +1,8 @@
+interface:
+  display_name: "JumpServer Create"
+  short_description: "JumpServer V4.10 白名单对象创建子 Skill，提供 dry-run、确认执行和密文脱敏。"
+  default_prompt: |
+    使用 $jumpserver-create 处理 JumpServer V4.10 白名单创建请求。
+    先读取 `references/index.md` 找到命令和字段文档，再核对仓库根级 `references/routing-and-safety.md`。未列入白名单的写操作必须阻塞。
+    所有 create 命令默认 dry-run；只有显式 `--confirm` 才真实写入。对象、平台和组织必须先解析，密文字段不得回显。
+    从仓库根目录执行 `python3 subskills/create/scripts/<entry>.py ...`；若本目录被独立注册且 cwd 位于本目录，执行 `python3 scripts/<entry>.py ...`。完整仓库必须保留，以便加载 sibling common 和查询解析能力。

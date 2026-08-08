@@ -906,6 +906,29 @@ def _normalize_login_audit_filters(filters: dict[str, Any], *, discovery=None) -
     )
     return payload
 
+def _normalize_password_change_audit_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
+    payload = _normalize_filter_alias(
+        filters,
+        source_key="source_ip",
+        target_key="remote_addr",
+        diagnostics_key="password_change_remote_addr_filter_normalization",
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="user",
+        diagnostics_key="password_change_user_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    payload = _normalize_user_display_filter(
+        payload,
+        key="change_by",
+        diagnostics_key="password_change_change_by_filter_normalization",
+        output_mode="display",
+        discovery=discovery,
+    )
+    return payload
+
 def _normalize_terminal_session_filters(filters: dict[str, Any], *, discovery=None) -> dict[str, Any]:
     payload = _normalize_filter_alias(
         filters,
@@ -2585,6 +2608,239 @@ def terminal_component_query(filters: dict[str, Any]) -> dict[str, Any]:
     rows = _fetch_list(TERMINALS_PATH, filters)
     return _with_org_context({"summary": {"terminal_count": len(rows)}, "records": rows})
 
+def _numeric_value(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def _extract_component_name(item: dict[str, Any]) -> str:
+    return _extract_identifier(
+        item,
+        "name",
+        "terminal.name",
+        "terminal",
+        "component",
+        "terminal_display",
+        "service",
+    )
+
+def _extract_component_id(item: dict[str, Any]) -> str:
+    return _extract_identifier(item, "id", "terminal_id", "terminal.id", "service_id")
+
+def _extract_component_load_metrics(item: dict[str, Any]) -> dict[str, Any]:
+    cpu_usage = _numeric_value(
+        _first_field(
+            item,
+            "stat.cpu_load",
+            "cpu",
+            "cpu_usage",
+            "cpu_percent",
+            "usage.cpu",
+            "metrics.cpu_usage",
+            "resource.cpu_percent",
+        )
+    )
+    memory_usage = _numeric_value(
+        _first_field(
+            item,
+            "stat.memory_used",
+            "memory",
+            "memory_usage",
+            "memory_percent",
+            "usage.memory",
+            "metrics.memory_usage",
+            "resource.memory_percent",
+        )
+    )
+    disk_usage = _numeric_value(
+        _first_field(
+            item,
+            "stat.disk_used",
+            "disk",
+            "disk_usage",
+            "disk_percent",
+            "usage.disk",
+            "metrics.disk_usage",
+            "resource.disk_percent",
+        )
+    )
+    session_count = _numeric_value(
+        _first_field(
+            item,
+            "stat.session_online",
+            "session_count",
+            "sessions",
+            "online_sessions",
+            "active_sessions",
+            "usage.sessions",
+            "metrics.session_count",
+            "connections",
+        )
+    )
+    connection_count = _numeric_value(
+        _first_field(
+            item,
+            "connection_count",
+            "connections",
+            "online_connections",
+            "active_connections",
+            "usage.connections",
+            "metrics.connection_count",
+        )
+    )
+    load_value = _numeric_value(
+        _first_field(
+            item,
+            "load.value",
+            "load",
+            "load_avg",
+            "load_average",
+            "usage.load",
+            "metrics.load",
+        )
+    )
+    load_label = _string_value(_first_field(item, "load.label")).strip() or None
+    return {
+        "cpu_usage_percent": cpu_usage,
+        "memory_usage_percent": memory_usage,
+        "disk_usage_percent": disk_usage,
+        "session_count": int(session_count) if session_count is not None else None,
+        "connection_count": int(connection_count) if connection_count is not None else None,
+        "load_value": load_value,
+        "load_label": load_label,
+    }
+
+def component_load_overview(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_time_filters(dict(filters), default_days=1)
+    terminals = _fetch_list(TERMINALS_PATH, payload)
+    records = []
+    high_load_count = 0
+    metric_ready_count = 0
+    for item in terminals:
+        metrics = _extract_component_load_metrics(item)
+        is_alive = parse_bool(_first_field(item, "is_alive", "alive"), default=None)
+        is_active = parse_bool(_first_field(item, "is_active", "active"), default=None)
+        status_text = _extract_status(item) or ("alive" if is_alive else "offline" if is_alive is False else "unknown")
+        has_metric = any(
+            metrics[key] is not None
+            for key in ("cpu_usage_percent", "memory_usage_percent", "disk_usage_percent", "load_value")
+        )
+        if has_metric:
+            metric_ready_count += 1
+        is_high_load = bool(
+            (metrics["cpu_usage_percent"] is not None and metrics["cpu_usage_percent"] >= 80.0)
+            or (metrics["memory_usage_percent"] is not None and metrics["memory_usage_percent"] >= 80.0)
+            or (metrics["disk_usage_percent"] is not None and metrics["disk_usage_percent"] >= 85.0)
+            or (metrics["load_value"] is not None and metrics["load_value"] >= 0.8)
+        )
+        if is_high_load:
+            high_load_count += 1
+        records.append(
+            {
+                "component_id": _extract_component_id(item) or None,
+                "component_name": _extract_component_name(item) or "unknown",
+                "component_type": _extract_identifier(item, "type", "terminal.type") or None,
+                "remote_addr": _extract_identifier(item, "remote_addr", "terminal.remote_addr") or None,
+                "is_active": is_active,
+                "is_alive": is_alive,
+                "status": status_text,
+                "is_high_load": is_high_load,
+                **metrics,
+            }
+        )
+    return _with_org_context(
+        {
+            "summary": {
+                "component_count": len(records),
+                "terminal_source_count": len(terminals),
+                "metric_ready_count": metric_ready_count,
+                "high_load_component_count": high_load_count,
+                "data_source": TERMINALS_PATH,
+                "filters": {
+                    key: value for key, value in payload.items() if key in {"date_from", "date_to", "days"}
+                },
+            },
+            "records": records,
+        }
+    )
+
+def _is_failed_password_change(item: dict[str, Any]) -> bool:
+    status_text = _lower(_extract_status(item))
+    reason_text = _lower(
+        _first_field(item, "reason", "detail", "message", "error", "error_message", "type")
+    )
+    failed_tokens = ("fail", "failed", "error", "denied", "失败", "错误")
+    reason_tokens = failed_tokens + ("timeout", "invalid", "超时")
+    return any(token in status_text for token in failed_tokens) or any(
+        token in reason_text for token in reason_tokens
+    )
+
+def _extract_password_change_error_type(item: dict[str, Any]) -> str:
+    value = _extract_identifier(
+        item,
+        "error_type",
+        "error.type",
+        "error_reason",
+        "reason",
+        "detail",
+        "message",
+        "error",
+        "type",
+    )
+    return value or "unknown"
+
+def change_password_failure_report(filters: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_password_change_audit_filters(
+        _normalize_time_filters(dict(filters), default_days=7)
+    )
+    records = _apply_common_filters(_fetch_list(PASSWORD_CHANGE_LOGS_PATH, payload), payload)
+    failed_records = [item for item in records if _is_failed_password_change(item)]
+    failed_ids = {id(item) for item in failed_records}
+    success_records = [item for item in records if id(item) not in failed_ids]
+    error_type_counter = Counter(_extract_password_change_error_type(item) for item in failed_records)
+    failed_asset_counter = Counter((_extract_asset(item) or "unknown") for item in failed_records)
+    failed_user_counter = Counter((_extract_user(item) or "unknown") for item in failed_records)
+    failure_detail_records = [
+        {
+            "id": item.get("id"),
+            "user": _extract_user(item) or None,
+            "asset": _extract_asset(item) or None,
+            "account": _extract_account(item) or None,
+            "change_by": _extract_change_by(item) or None,
+            "remote_addr": _extract_source_ip(item) or None,
+            "status": _extract_status(item) or None,
+            "error_type": _extract_password_change_error_type(item),
+            "timestamp": _extract_datetime(item),
+        }
+        for item in failed_records[:200]
+    ]
+    total = len(records)
+    failed_total = len(failed_records)
+    success_total = len(success_records)
+    return _with_org_context(
+        {
+            "summary": {
+                "total": total,
+                "success_total": success_total,
+                "failed_total": failed_total,
+                "success_rate": round((success_total / total) * 100, 2) if total else 0.0,
+                "failure_rate": round((failed_total / total) * 100, 2) if total else 0.0,
+                "top_error_types": _top(error_type_counter),
+                "top_failed_assets": _top(failed_asset_counter),
+                "top_failed_users": _top(failed_user_counter),
+                "filters": {
+                    key: value
+                    for key, value in payload.items()
+                    if key in {"date_from", "date_to", "days", "search", "user", "change_by", "remote_addr", "status"}
+                },
+            },
+            "records": failure_detail_records,
+        }
+    )
+
 def _report_server_filters(report_type: str, filters: dict[str, Any]) -> dict[str, Any]:
     payload = _server_filters(filters)
     if report_type in REPORT_TYPES_WITH_NATIVE_DAYS:
@@ -2777,6 +3033,8 @@ HANDLERS = {
     "command_storage_query": command_storage_query,
     "replay_storage_query": replay_storage_query,
     "terminal_component_query": terminal_component_query,
+    "component_load_overview": component_load_overview,
+    "change_password_failure_report": change_password_failure_report,
     "report_query": report_query,
     "account_automation_overview": account_automation_overview,
 }

@@ -1,11 +1,13 @@
 ---
 name: jumpserver-common
-description: JumpServer shared runtime helper skill for config checks, preflight, connectivity, organization selection, and endpoint verification. Use before query/create/update when runtime state is unknown.
+description: JumpServer shared runtime helper skill for config checks, preflight, connectivity, organization selection, and endpoint verification. Use before access/query/create/update when runtime state is unknown.
 ---
 
 # Common
 
 common 子 Skill 只负责配置、预检、组织选择、连通性和端点验证；不处理业务查询或业务写入。
+
+若本目录被独立注册为 Skill 根目录，使用 [agents/openai.yaml](agents/openai.yaml)，并从本目录 cwd 执行 `python3 scripts/jms_common.py ...`；完整仓库要求见 [子 Skill 独立注册](../../references/subskill-registration.md)。
 
 ## 输入 / 输出
 

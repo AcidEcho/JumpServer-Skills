@@ -93,6 +93,8 @@
 | `replay-storage-query` | 录像存储查询 | 系统设置与配置巡检类 | `jms_inspect.py inspect` | 专项能力 |
 | `report-query` | 统计报告查询 | 系统设置与配置巡检类 | `jms_inspect.py inspect` | 专项能力 |
 | `account-automation-overview` | 账号自动化与风险概览 | 系统设置与配置巡检类 | `jms_inspect.py inspect` | 专项能力 |
+| `component-load-overview` | 组件负载概览 | 系统设置与配置巡检类 | `jms_inspect.py inspect` | 核心能力 |
+| `change-password-failure-report` | 改密失败报错分析报表 | 日志与审计类 | `jms_inspect.py inspect` | 核心能力 |
 
 ## P2
 

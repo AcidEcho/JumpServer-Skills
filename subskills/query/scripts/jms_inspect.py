@@ -47,9 +47,11 @@ def _inspect(args: argparse.Namespace) -> dict[str, Any]:
             "search",
             "user",
             "user_id",
+            "change_by",
             "asset",
             "asset_keywords",
             "status",
+            "remote_addr",
             "direction",
             "keyword",
             "protocol",
@@ -88,9 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     inspect.add_argument("--search")
     inspect.add_argument("--user")
     inspect.add_argument("--user-id", dest="user_id")
+    inspect.add_argument("--change-by", dest="change_by")
     inspect.add_argument("--asset")
     inspect.add_argument("--asset-keywords", dest="asset_keywords")
     inspect.add_argument("--status")
+    inspect.add_argument("--remote-addr", dest="remote_addr")
     inspect.add_argument("--direction")
     inspect.add_argument("--keyword")
     inspect.add_argument("--protocol")

@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` 是一个面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、模板化使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令；除白名单 create 入口外，其余服务端能力保持非破坏性读取，create 输出会自动脱敏密文字段。
+`jumpserver-skills` 是一个面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、当前身份一次性 SSH 连接、模板化使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令；持久业务写入只开放白名单 create 入口，Access 仅允许显式确认后创建不可复用的短生命周期 connection token，create 输出仍会自动脱敏密文字段。
 
 [English](./README.en.md)
 
@@ -18,10 +18,11 @@
 |---|---|---|---|
 | 环境预检与组织选择 | “检查配置是否可用”“测试连通性”“切到 Default 组织” | `jms_common.py` | 先确认 `.env`、认证、组织和端点；本地写入仅限 `.env`、`.env.lock` 及 `.env.recovery-*` 恢复文件 |
 | 对象查询 | “查这个资产/用户/账号/节点/标签”“看某个平台详情” | `jms_query.py` / `jms_runtime_query.py` | 返回对象清单、详情或候选项；对象不唯一时先让使用者确认 |
-| 用户有效访问范围 | “某用户能访问哪些资产/节点”“某资产下他能用哪些账号和协议” | `jms_access.py` | 优先返回 effective access 结果，不默认展开授权规则推导 |
+| 用户有效访问范围 | “某用户能访问哪些资产/节点/账号/协议” | Query 的 `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | 返回 effective access，不创建 connection token |
+| 当前身份一次性 SSH | “通过 JumpServer 连接这台机器” | Access 的 `subskills/access/scripts/jms_ssh_connect.py connect-info` | 必须唯一选择资产/托管账号并显式 `--confirm`，token 固定不可复用 |
 | 权限关系回看 | “这个资产授权给了谁”“为什么这个用户能访问”“看某条授权规则详情” | `jms_permissions.py` | 区分授权主体、实际可访问者和超级管理员影响，不混淆口径 |
 | 审计调查 | “昨天谁登录失败了”“查某用户会话/命令/文件传输”“分析高危命令” | `jms_audit.py` | 按明确组织和时间窗查询日志、记录、明细或聚合结果 |
-| 治理巡检与访问分析 | “做资产治理巡检”“分析账号风险”“看访问排行/异常行为” | `jms_inspect.py` / `jms_audit.py` | 使用内置 capability 聚合分析，不要求使用者手工拼零散查询 |
+| 治理巡检与访问分析 | “做资产治理巡检”“看组件负载”“分析改密失败”“看访问排行/异常行为” | `jms_inspect.py` / `jms_audit.py` | 使用内置 capability 聚合分析，不要求使用者手工拼零散查询 |
 | 使用报告 | “生成日报”“分析 2026-03-10 的堡垒机使用情况”“看某段时间使用概览” | `jms_report.py` | 默认生成完整 HTML 报告，并回显报告路径、时间窗、组织和校验摘要 |
 | 受控创建 | “创建用户/组织/标签/节点/资产/网域/网关/账号模板/授权规则/ACL/脱敏规则” | [create 入口索引](./subskills/create/references/index.md) | 仅开放白名单 create 入口；无 `--confirm` 只预览，有 `--confirm` 才创建；密文字段脱敏 |
 
@@ -49,6 +50,8 @@ cp .env.example .env
 ```
 
 2. 把这个 skill 接到你的 agent 或 Codex 环境里使用。仓库中的 [agents/openai.yaml](./agents/openai.yaml) 提供了一个现成的 skill 接入描述，可作为引用或注册该 skill 的入口之一。
+
+宿主一次只能注册一个子 Skill 时，也可使用 `subskills/common|access|query|create|update/agents/openai.yaml`。Access 可作为独立可选入口，命令 cwd 和完整仓库要求见 [子 Skill 独立注册](./references/subskill-registration.md)。
 
 3. 直接用自然语言描述需求，不需要手动拼接脚本命令。例如“查某某用户在 Default 组织下有哪些资产”“看看昨天使用情况”“看某条授权规则详情”。
 
@@ -95,11 +98,12 @@ cp .env.example .env
 | 场景 | 可以这样问 | 自动路由 |
 |---|---|---|
 | 对象查询 | “查一下 `Demo-User` 这个用户的详情”“看看 `Demo-Node` 节点里有哪些资产”“帮我看 `Linux` 平台下有哪些可用资产” | `jms_query.py` |
-| 用户有效访问范围 | “某某用户在 Default 组织下有哪些资产”“某某用户有哪些节点”“某某用户在某资产下有哪些账号和协议” | `jms_access.py` |
+| 用户有效访问范围 | “某某用户在 Default 组织下有哪些资产”“某某用户有哪些节点”“某某用户在某资产下有哪些账号和协议” | Query：`subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` |
+| 当前身份一次性 SSH | “通过 JumpServer 连接 10.1.1.1”“先获取这台机器的 SSH 信息再部署” | Access：`subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` |
 | 权限关系回看 | “这台资产授权给了谁”“某某用户为什么能访问某资产”“看这条授权规则详情” | `jms_permissions.py` |
 | 审计调查 | “查最近一周的登录审计”“看某个用户的会话记录和异常中断情况”“导出某天命令记录详情” | `jms_audit.py` |
 | 使用报告 | “看看昨天使用情况”“想看上周谁登录最多”“过一下 3 月上旬哪些资产最活跃” | `jms_report.py` |
-| 治理巡检 | “做一次资产治理巡检”“分析账号风险”“看最近访问异常” | `jms_inspect.py` |
+| 治理巡检 | “做一次资产治理巡检”“看组件 CPU/内存负载”“分析近 30 天改密失败原因” | `jms_inspect.py` |
 | 受控创建 | “创建用户”“创建节点”“创建主机资产”“创建资产授权规则”“创建数据脱敏规则” | create 子 Skill，入口见 [create 索引](./subskills/create/references/index.md) |
 
 容易混淆的问法按下面规则处理：
@@ -107,6 +111,7 @@ cp .env.example .env
 | 问法特征 | 归类 |
 |---|---|
 | “能访问哪些资产 / 节点 / 账号 / 协议” | 用户有效访问范围，返回结果清单 |
+| “连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息” | 当前 API 身份 SSH 连接；不代替其他用户签发 token |
 | “为什么能访问 / 授权规则详情 / 权限依据” | 权限关系回看，解释授权来源 |
 | “这台资产授权给了谁 / 谁被授权到这台资产” | 默认回答授权主体，不默认把超级管理员算进去 |
 | “某天登录情况 / 会话概览 / 谁最多 / 哪些最活跃” | 使用报告或使用分析 |
@@ -157,6 +162,7 @@ create 的组织规则不在 README 重复展开。需要记住的边界是：�
 | 配置或鉴权不完整 | 先补齐 `.env` 或执行预检 |
 | 对象名称重名、平台不明确、组织不明确 | 返回候选项，要求使用者确认 |
 | 查询结果跨组织，或当前组织与目标对象所在组织不一致 | 要求明确目标组织 |
+| SSH 目标资产、协议或托管凭据账号不唯一 | 返回候选或阻塞，不创建 connection token |
 | 多组织且没有当前组织可用 | 返回 `candidate_orgs`，要求先选择组织 |
 | 用户试图绕过正式入口、跳过预检或现场拼临时脚本 | 阻塞，要求使用正式入口 |
 
@@ -166,17 +172,20 @@ create 的组织规则不在 README 重复展开。需要记住的边界是：�
 |---|---|---|
 | 接入这个 skill | [SKILL.md](./SKILL.md)、[agents/openai.yaml](./agents/openai.yaml) | 顶层路由、默认提示词、响应约束 |
 | 安全边界和白名单 | [references/routing-and-safety.md](./references/routing-and-safety.md) | 正式入口边界、允许写操作、全局阻塞规则 |
-| 查询、访问、权限、审计、巡检怎么路由 | [subskills/query/references/routing-playbook.md](./subskills/query/references/routing-playbook.md)、[capabilities.md](./subskills/query/references/capabilities.md) | 触发词、能力目录、阻塞规则与反例 |
+| 查询、有效访问、权限、审计、巡检怎么路由 | [intent-routing.md](./subskills/query/references/intent-routing.md)、[routing-playbook.md](./subskills/query/references/routing-playbook.md)、[capabilities.md](./subskills/query/references/capabilities.md) | Query 二次意图分类、触发词、能力目录、阻塞规则与反例 |
+| Access 一次性 SSH 怎么创建和使用 | [ssh-connection.md](./subskills/access/references/ssh-connection.md) | `connect-info`、`users/self`、确认门槛、API 流程、token 生命周期和安全边界 |
+| 组件负载与改密失败分析 | [component-load-and-password-report.md](./subskills/query/references/component-load-and-password-report.md) | 指标字段、负载阈值、失败识别和统计口径 |
 | 使用报告怎么生成 | [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | 模板化报告流程、时间范围、组织优先级 |
 | 对象查询和权限审计细节 | [assets.md](./subskills/query/references/assets.md)、[permissions.md](./subskills/query/references/permissions.md)、[audit.md](./subskills/query/references/audit.md)、[diagnose.md](./subskills/query/references/diagnose.md) | 资产/账号/用户/节点查询、授权关系、日志审计、治理诊断 |
 | create 能创建什么 | [subskills/create/references/index.md](./subskills/create/references/index.md) | create 命令、入口脚本、字段文档索引 |
 | 运行时、预检和排障 | [runtime.md](./subskills/common/references/runtime.md)、[safety-rules.md](./subskills/common/references/safety-rules.md)、[troubleshooting.md](./subskills/common/references/troubleshooting.md) | `.env`、组织选择、本地写入边界、常见失败处理 |
+| 独立注册与扩展维护 | [subskill-registration.md](./references/subskill-registration.md)、[ADD-SUBSKILL-GUIDE.md](./ADD-SUBSKILL-GUIDE.md) | 单子 Skill 接入、能力/命令/新域扩展和验收清单 |
 
 ## 不支持范围
 
 以下请求不会执行：
 
-- 服务端写操作只开放白名单 create 入口；对象更新、删除、解锁及未开放的权限创建、变更、移除一律不执行，完整范围以 [`references/routing-and-safety.md`](./references/routing-and-safety.md) 为准。
+- 持久服务端写操作只开放白名单 create 入口；另允许 `connect-info --confirm` 为当前身份创建 `is_reusable=false` 的短生命周期 token。对象更新、删除、解锁及未开放的权限创建、变更、移除一律不执行，完整范围以 [`references/routing-and-safety.md`](./references/routing-and-safety.md) 为准。
 - 跳过预检、绕过正式入口，或临时拼 SDK/HTTP 脚本执行业务动作。
 - 对象、组织或跨组织关系不明确时继续猜测执行。
 - 报告类请求绕过 `jms_report.py`，改用临时拼装逻辑。

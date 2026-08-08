@@ -1,11 +1,13 @@
 ---
 name: jumpserver-query
-description: JumpServer query-only subskill. Use for object lookup, user access scope, permissions, RBAC, ACL, audit logs, terminal sessions, reports, inspections, governance rankings, and read-only runtime data.
+description: JumpServer query-only subskill. Use for current or named-user effective-access results, including accessible assets, nodes, accounts, and protocols; object lookup; permission, RBAC, and ACL explanations; login, session, command, transfer, and job audits; HTML usage reports; governance rankings; component load; password-change failure analysis; and read-only runtime data. Current-identity one-time SSH connect-info and connection/connect token requests belong to the separate jumpserver-access skill.
 ---
 
 # Query
 
-所有查询类能力只放在本子 Skill。禁止创建、更新、删除。
+查询类能力集中在本子 Skill。禁止创建、更新、删除。用户有效访问范围由本目录 `jms_access.py` 的 `user-assets`、`user-nodes`、`user-asset-access` 正式提供；当前身份一次性 SSH 连接转到独立 [Access](../access/SKILL.md)。Query 不得导入或加载 Access。
+
+若本目录被独立注册为 Skill 根目录，使用 [agents/openai.yaml](agents/openai.yaml)；从本目录 cwd 执行 `python3 scripts/<entry>.py ...`。该模式仍要求完整仓库存在，详见 [子 Skill 独立注册](../../references/subskill-registration.md)。
 
 ## 输入 / 输出
 
@@ -19,12 +21,22 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 | 查询类型 | 入口 | 主要命令 |
 |---|---|---|
 | 对象清单/详情/解析 | `python3 subskills/query/scripts/jms_query.py ...` | `object-list`, `object-get`, `resolve` |
-| 用户访问范围 | `python3 subskills/query/scripts/jms_access.py ...` | `user-assets`, `user-nodes`, `user-asset-access` |
+| 用户有效访问范围 | `python3 subskills/query/scripts/jms_access.py ...` | `user-assets`, `user-nodes`, `user-asset-access` |
 | 权限/RBAC/ACL | `python3 subskills/query/scripts/jms_permissions.py ...` | `permission-list`, `permission-get`, `asset-perm-users`, `asset-permission-explain` |
 | 审计/会话/命令/作业 | `python3 subskills/query/scripts/jms_audit.py ...` | `audit-list`, `audit-get`, `recent-audit`, `terminal-sessions`, `job-list`, `command-storage-hint`, `audit-analyze`, `capabilities` |
 | 巡检/治理/排行 | `python3 subskills/query/scripts/jms_inspect.py ...` | `inspect`, `capabilities` |
 | 只读运行时数据 | `python3 subskills/query/scripts/jms_runtime_query.py ...` | `settings-category`, `license-detail`, `tickets`, `command-storages`, `replay-storages`, `terminals`, `reports`, `account-automations`, `resolve-platform` |
 | HTML 使用报告 | `python3 subskills/query/scripts/jms_report.py ...` | `daily-usage-prepare`, `daily-usage-render`, `contract-check` |
+
+## Intent Routing
+
+触发后先读取 [查询意图路由](references/intent-routing.md)，只加载当前意图对应的深层 reference。特别规则：
+
+| 意图 | 入口 |
+|---|---|
+| 组件 CPU/内存/磁盘/会话负载与高负载判断 | `jms_inspect.py inspect --capability component-load-overview` |
+| 改密失败率、错误类型、失败资产/用户排行 | `jms_inspect.py inspect --capability change-password-failure-report` |
+| 单条组件清单或改密日志明细 | `jms_runtime_query.py` 或 `jms_audit.py`，不使用上述聚合 capability |
 
 ## Rules
 
@@ -35,7 +47,8 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 | 单次命令覆盖组织 | `--org-id` / `--org-name` 不写 `.env` |
 | 全局用户解析 | 可显式传全局组织 ID |
 | 分页参数 | 不使用 `--limit` / `--offset`；脚本内部负责分页和汇总 |
-| 查询类脚本 | 可以读取 JumpServer API，但不能产生业务写入 |
+| Query 自有脚本 | 只读 JumpServer API，不产生业务写入 |
+| `jms_access.py` | Query 正式只读入口；返回用户有效访问结果，不创建 connection token |
 | 统计问题 | 先写 `时间范围 + 组织 + 统计口径`，再给结论 |
 | 报告类请求 | 先生成并验证 HTML 报告，再补充摘要；示例：帮我分析下 `20260310` 的堡垒机使用情况 |
 
@@ -82,6 +95,7 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 | 不适用场景 | 处理 |
 |---|---|
 | 创建、更新、删除业务对象 | 转到 create/update 边界并阻塞 |
+| 当前身份 connection token | 转到 Access；Query 不实现 `connect-info`，也不依赖 Access |
 | 报告类请求绕过 `jms_report.py` | 阻塞临时拼装 |
 | 对象、组织、时间范围不明确 | 返回候选或要求补充 |
 
@@ -102,7 +116,7 @@ description: JumpServer query-only subskill. Use for object lookup, user access 
 
 ```bash
 python3 subskills/query/scripts/jms_query.py object-list --resource user --name openclaw
-python3 subskills/query/scripts/jms_access.py user-assets --username example.user
+python3 subskills/query/scripts/jms_access.py user-assets --org-name Default --username example.user
 python3 subskills/query/scripts/jms_permissions.py asset-perm-users --asset-id <asset-id>
 python3 subskills/query/scripts/jms_audit.py audit-list --audit-type login --days 30 --username example.user
 python3 subskills/query/scripts/jms_inspect.py inspect --capability hot-assets-ranking --days 30 --top 10

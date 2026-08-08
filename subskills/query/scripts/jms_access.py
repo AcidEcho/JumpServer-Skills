@@ -459,7 +459,7 @@ def _add_optional_org_arguments(parser: argparse.ArgumentParser) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="JumpServer 用户有效访问范围入口。",
+        description="JumpServer 用户有效访问范围查询入口。",
         formatter_class=CLIHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -498,6 +498,7 @@ def build_parser() -> argparse.ArgumentParser:
     user_asset_access.add_argument("--asset-name")
     _add_optional_org_arguments(user_asset_access)
     user_asset_access.set_defaults(func=_user_asset_access)
+
     return parser
 
 
@@ -517,3 +518,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+

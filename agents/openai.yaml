@@ -1,6 +1,6 @@
 interface:
   display_name: "JumpServer Skills"
-  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖资产/账号/用户/组织查询、权限查询、用户有效访问范围、登录/会话/命令/传输审计、治理巡检、访问分析、23 个 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则），以及某天或某时间段的 JumpServer 使用报告。详细写操作白名单与组织限制以 `references/routing-and-safety.md` 为准；report 类请求必须经由 `jms_report.py daily-usage-prepare` 与 `daily-usage-render`。"
+  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖资产/账号/用户/组织查询、权限查询、用户有效访问范围、当前身份一次性 SSH 连接信息、登录/会话/命令/传输审计、治理巡检、组件负载、改密失败分析、访问分析、23 个 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则），以及某天或某时间段的 JumpServer 使用报告。详细写操作白名单与组织限制以 `references/routing-and-safety.md` 为准；report 类请求必须经由 `jms_report.py daily-usage-prepare` 与 `daily-usage-render`。"
   default_prompt: |
     使用 $jumpserver-skills 处理 JumpServer V4.10 请求。
 
@@ -8,23 +8,27 @@ interface:
     - 路由优先级、写操作白名单、组织限制、密文脱敏要求：以 `references/routing-and-safety.md` 为唯一来源。
     - 每条 create 命令的字段、payload 和示例：以 `subskills/create/references/index.md` 及其子文档为准。
     - 查询/巡检/审计 capability 详情：以 `subskills/query/references/` 下的文档为准。
+    - 当前身份一次性 SSH 连接与 token 生命周期：以 `subskills/access/references/ssh-connection.md` 为准。
     - 本 prompt 只保留路由优先级、阻塞红线、统计口径与执行习惯。
 
     ## 路由优先级（高 -> 低）
     1. 报告 / 使用分析（核心对象是某天 / 某时间段的整体使用数据）-> `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render`。
     2. 配置 / 组织 / 连通性 / 解析 -> `jms_common.py`、`jms_query.py resolve`、`jms_runtime_query.py`。
-    3. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号"）-> `jms_access.py user-assets / user-nodes / user-asset-access`。
-    4. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
-    5. 审计调查（明确日期或时间段下的登录 / 会话 / 命令 / 传输明细）-> `jms_audit.py`。
-    6. 对象查询（按名称、地址、节点、平台、启用状态等读取对象）-> `jms_query.py object-list / object-get`。
-    7. 治理 / 聚合分析（capability 化的统计、排行、巡检）-> `jms_inspect.py inspect` 或 `jms_audit.py audit-analyze`。
+    3. 当前身份 SSH（"通过 JumpServer 连接这台机器 / 获取一次性 SSH 信息"）-> Access 子 Skill 的 `python3 subskills/access/scripts/jms_ssh_connect.py connect-info`。
+    4. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号 / 协议"）-> Query 子 Skill 的 `python3 subskills/query/scripts/jms_access.py user-assets / user-nodes / user-asset-access`。
+    5. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
+    6. 审计调查（明确日期或时间段下的登录 / 会话 / 命令 / 传输明细）-> `jms_audit.py`。
+    7. 对象查询（按名称、地址、节点、平台、启用状态等读取对象）-> `jms_query.py object-list / object-get`。
+    8. 治理 / 聚合分析（capability 化的统计、排行、巡检）-> `jms_inspect.py inspect` 或 `jms_audit.py audit-analyze`。
+
+    查询域内部分类以 `subskills/query/references/intent-routing.md` 为准。组件 CPU/内存/磁盘/会话负载走 `component-load-overview`；改密失败率、错误类型和失败资产/用户排行走 `change-password-failure-report`。组件清单或改密日志明细仍走运行时查询/审计入口，不用聚合 capability 替代。
 
     ## 报告 / 使用分析的强约束
     - 触发条件：核心是某天或某时间段的整体使用情况、日报/周报/月报、使用统计/概览、"某天发生了什么"，或 "帮我分析下某天堡垒机器的使用情况"、"帮我分析下20260310的堡垒机使用情况" 这类说法（含具体日期或相对日期）。
     - 必须先把 `昨天 / 20260310 / 3 月 10 号 / 上周 / 本月` 等表达归一化为明确时间窗，再调用 `jms_report.py daily-usage-prepare`；不要先输出自由文本摘要。
     - `daily-usage-prepare` 返回 `summary_input` 后，必须由 Skill 基于这些结构化数据写 8 个分析字段，再保存摘要 JSON 并调用 `jms_report.py daily-usage-render --prepared-path ... --summary-file ...`。禁止让脚本为这些字段生成兜底文案。
     - 报告生成成功后，必须先回显"报告已生成"，然后顺序回显：报告文件路径、文件大小、模板路径、字段元数据路径、报告日期 / 开始时间 / 结束时间、生效组织、可切换组织、已查询命令存储 ID / 数量、`validation_summary`；中文标签后可以括号补原字段名，例如 `生效组织（effective_org）`、`校验摘要（validation_summary）`。
-    - 未显式传组织时报告 prepare 默认全局组织 `00000000-0000-0000-0000-000000000000` 且不写 `.env`；显式传 `--org-id` 或唯一匹配 `--org-name` 时按该组织生成并写 `.env JMS_ORG_ID`。
+    - 未显式传组织时报告 prepare 默认全局组织 `00000000-0000-0000-0000-000000000000` 且不写 `.env`；显式传 `--org-id` 或唯一匹配 `--org-name` 时按该组织生成，仅限本次报告，不写 `.env JMS_ORG_ID`。
     - 跳过模板报告的前提：用户明确说"不要生成报告，直接分析 / 先简单说下 / 只给我结论 / 不用模板"。跳过时仍要把相对时间词固定为明确 `date_from / date_to`；"近一个月" 默认按 recent 30 days，不按自然月，除非用户明确说"上个月 / 3 月整月"。
 
     ## 登录次数 / 审计调查的路由要点
@@ -34,7 +38,9 @@ interface:
     - 用户某天连接过哪些机器 / 某天会话数：先解析用户，再 `jms_audit.py audit-analyze --capability session-record-query --filters ...`；用户 UUID 写入 `filters.user_id`，不要塞进 `filters.user`；不要先用 `audit-list --audit-type session` 下结论。
 
     ## 用户有效访问范围 vs 权限关系（边界）
-    - "某用户能访问哪些资产 / 节点 / 账号 / 协议"（结果型）-> `jms_access.py user-assets / user-nodes / user-asset-access`；优先返回 `asset_count + assets`、`node_count + nodes`、`permed_accounts + permed_protocols`，不要退回授权规则说明。
+    - "某用户能访问哪些资产 / 节点 / 账号 / 协议"（结果型）-> Query 子 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`；优先返回 `asset_count + assets`、`node_count + nodes`、`permed_accounts + permed_protocols`，不要退回授权规则说明。
+    - "连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息" -> Access 子 Skill 的 `jms_ssh_connect.py connect-info`；只使用当前 API 身份 `users/self`，资产、SSH 协议和 `has_secret=true` 账号必须唯一，显式 `--confirm` 后固定创建 `is_reusable=false` token。
+    - 一次 token 只用于一次 SSH 认证；多条命令复用同一 SSH 会话，断线后重新获取。不得保存原始 `jms_url`、token 或密码；只有 ready 成功结果的 `result.connection.password` 可以在当次响应中明文使用。
     - "在 Default 组织下 / 在某组织下" 是显式组织，不是弱过滤提示；先解析组织 ID，再 `--org-id` 单次命令限定，不要回退成"全组织检查"。中文姓名等显示名先解析用户再用 `user-id` 执行。
     - "为什么能访问 / 依据是什么 / 授权规则 / 权限详情 / 节点授权是否覆盖某资产" -> `jms_permissions.py asset-permission-explain`、`permission-list`、`permission-get`。
     - "资产授权给了谁 / 谁被授权到这台资产" -> 先解析资产，再 `jms_permissions.py asset-perm-users --asset-id ...`；默认只回答授权主体，不混入超级管理员。`asset-perm-users` 为空时再用 `asset-permission-explain` 区分"授权主体为空"与"规则解释命中但服务端授权用户视图为空"。
@@ -43,7 +49,7 @@ interface:
     - 写操作仅限 `references/routing-and-safety.md` 的"允许写操作"白名单里 23 条；其他写操作一律阻塞。
     - 所有 create 命令默认 dry-run；必须显式追加 `--confirm` 才解析必要引用并 POST。对象唯一性由 JumpServer 服务端原子约束，Skill 不增加客户端预查重请求。
     - 组织规则、`--org-id / --org-name` 是否写 `.env`、是否禁止全局组织、是否要求全局组织：以 `references/routing-and-safety.md` 与各 `subskills/create/references/<command>.md` 为准；本 prompt 不再逐命令重复。
-    - dry-run 与回显必须脱敏：`secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`。
+    - dry-run 与回显默认必须脱敏：`secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`；唯一例外是 `connect-info` ready 成功结果的 `result.connection.password`。
     - 创建用户组添加成员只接受用户 ID；如果用户给的是姓名/username/email，先 `jms_query.py resolve --resource user --name <value>` 解析。
     - 邀请用户加入组织时 `--user` 可以传 username / email / 姓名 / UUID，脚本会在全局组织解析。
     - 添加用户到用户组时 `--user` 与 `--user-group` 都只在目标组织解析。

@@ -1973,5 +1973,66 @@
     "summary_strategy": "返回各模块原始结果并汇总 partial_failures，便于做环境级验证。",
     "error_handling": "单个接口失败时保留其余接口结果，不中断整体概览。",
     "coverage": "专项能力"
+  },
+  {
+    "capability_id": "component-load-overview",
+    "name": "组件负载概览",
+    "category": "系统设置与配置巡检类",
+    "priority": "P1",
+    "entrypoint": "jms_inspect.py inspect",
+    "handler": "component_load_overview",
+    "trigger_description": "适用于查看 JumpServer 各组件的负载与运行状态，聚合 CPU、内存、磁盘、在线会话和高负载标记。",
+    "examples": [
+      "查询当前各组件负载情况",
+      "查看近 1 天组件高负载情况"
+    ],
+    "endpoints": [
+      "/api/v1/terminal/terminals/"
+    ],
+    "scripts": [
+      "subskills/query/scripts/jms_inspect.py",
+      "subskills/query/scripts/jms_inspect_core.py"
+    ],
+    "input_params": [
+      "days",
+      "date_from",
+      "date_to"
+    ],
+    "summary_strategy": "按组件输出状态和负载指标，汇总高负载组件数量与可用指标覆盖情况。",
+    "error_handling": "终端接口没有负载字段时保留组件基础状态，并通过 metric_ready_count 明确指标覆盖。",
+    "coverage": "核心能力"
+  },
+  {
+    "capability_id": "change-password-failure-report",
+    "name": "改密失败报错分析报表",
+    "category": "日志与审计类",
+    "priority": "P1",
+    "entrypoint": "jms_inspect.py inspect",
+    "handler": "change_password_failure_report",
+    "trigger_description": "适用于按时间窗分析改密失败日志，输出报错类型、失败资产和成功/失败占比。",
+    "examples": [
+      "生成近 30 天改密失败分析报表",
+      "分析最近一周改密失败的报错类型和资产分布"
+    ],
+    "endpoints": [
+      "/api/v1/audits/password-change-logs/"
+    ],
+    "scripts": [
+      "subskills/query/scripts/jms_inspect.py",
+      "subskills/query/scripts/jms_inspect_core.py"
+    ],
+    "input_params": [
+      "days",
+      "date_from",
+      "date_to",
+      "search",
+      "user",
+      "change_by",
+      "remote_addr",
+      "status"
+    ],
+    "summary_strategy": "输出改密总数、成功/失败总数与占比，并给出失败报错类型、失败资产和失败用户 Top。",
+    "error_handling": "状态或错误字段不统一时按多字段识别失败原因，未命中错误类型统一归类为 unknown。",
+    "coverage": "核心能力"
   }
 ]
