@@ -1,0 +1,8 @@
+interface:
+  display_name: "JumpServer Access"
+  short_description: "获取当前 API 身份的一次性 JumpServer SSH connect-info / connect token。"
+  default_prompt: |
+    使用 $jumpserver-access 为当前 API 身份获取授权资产的一次性 SSH 连接信息、connection token / connect token。只执行 `connect-info`；用户有效访问范围必须转到 $jumpserver-query 的 `user-assets / user-nodes / user-asset-access`。
+    从仓库根目录执行 `python3 subskills/access/scripts/jms_ssh_connect.py connect-info ...`；若本目录被独立注册且 cwd 位于本目录，执行 `python3 scripts/jms_ssh_connect.py connect-info ...`。Access 不依赖 Query；两者不得互相导入或加载，只共享 sibling Common。完整仓库仍需保留以加载 Common。
+    `connect-info` 只使用 `users/self`，必须唯一选择资产、SSH 协议和 `has_secret=true` 账号；未显式 `--confirm` 时不得创建 token。一次 token 只用于一次 SSH 认证，多条命令复用同一会话，断线后重新获取；不得缓存或记录密码、token、原始 `jms_url`。
+    只有 ready 结果中的 `result.connection.password` 可以用于当次连接；其他密文字段和所有错误输出必须脱敏。权限原因转到 query 的 `jms_permissions.py`。
