@@ -122,6 +122,7 @@ ENTRYPOINT_SCRIPT_REFS = {
     "jms_query.py": "subskills/query/scripts/jms_query.py",
     "jms_access.py": "subskills/query/scripts/jms_access.py",
     "jms_ssh_connect.py": "subskills/access/scripts/jms_ssh_connect.py",
+    "jms_db_connect.py": "subskills/access/scripts/jms_db_connect.py",
     "jms_permissions.py": "subskills/query/scripts/jms_permissions.py",
     "jms_audit.py": "subskills/query/scripts/jms_audit.py",
     "jms_inspect.py": "subskills/query/scripts/jms_inspect.py",

@@ -1,6 +1,6 @@
 interface:
   display_name: "JumpServer Skills"
-  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖资产/账号/用户/组织查询、权限查询、用户有效访问范围、当前身份一次性 SSH 连接信息、登录/会话/命令/传输审计、治理巡检、组件负载、改密失败分析、访问分析、23 个 create 写操作（用户/用户组/组织/邀请/标签/节点/资产/网域/网关/账号模板/账号绑定/各类 ACL/资产授权/数据脱敏规则），以及某天或某时间段的 JumpServer 使用报告。详细写操作白名单与组织限制以 `references/routing-and-safety.md` 为准；report 类请求必须经由 `jms_report.py daily-usage-prepare` 与 `daily-usage-render`。"
+  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖查询、权限、审计、巡检、当前身份 SSH/MySQL/MariaDB 连接、受控创建和使用报告。"
   default_prompt: |
     使用 $jumpserver-skills 处理 JumpServer V4.10 请求。
 
@@ -15,11 +15,12 @@ interface:
     1. 报告 / 使用分析（核心对象是某天 / 某时间段的整体使用数据）-> `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render`。
     2. 配置 / 组织 / 连通性 / 解析 -> `jms_common.py`、`jms_query.py resolve`、`jms_runtime_query.py`。
     3. 当前身份 SSH（"通过 JumpServer 连接这台机器 / 获取一次性 SSH 信息"）-> Access 子 Skill 的 `python3 subskills/access/scripts/jms_ssh_connect.py connect-info`。
-    4. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号 / 协议"）-> Query 子 Skill 的 `python3 subskills/query/scripts/jms_access.py user-assets / user-nodes / user-asset-access`。
-    5. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
-    6. 审计调查（明确日期或时间段下的登录 / 会话 / 命令 / 传输明细）-> `jms_audit.py`。
-    7. 对象查询（按名称、地址、节点、平台、启用状态等读取对象）-> `jms_query.py object-list / object-get`。
-    8. 治理 / 聚合分析（capability 化的统计、排行、巡检）-> `jms_inspect.py inspect` 或 `jms_audit.py audit-analyze`。
+    4. 当前身份 MySQL/MariaDB（"连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL"）-> Access 子 Skill 的 `python3 subskills/access/scripts/jms_db_connect.py db-query`；读取 `subskills/access/references/database-connection.md`。
+    5. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号 / 协议"）-> Query 子 Skill 的 `python3 subskills/query/scripts/jms_access.py user-assets / user-nodes / user-asset-access`。
+    6. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
+    7. 审计调查（明确日期或时间段下的登录 / 会话 / 命令 / 传输明细）-> `jms_audit.py`。
+    8. 对象查询（按名称、地址、节点、平台、启用状态等读取对象）-> `jms_query.py object-list / object-get`。
+    9. 治理 / 聚合分析（capability 化的统计、排行、巡检）-> `jms_inspect.py inspect` 或 `jms_audit.py audit-analyze`。
 
     查询域内部分类以 `subskills/query/references/intent-routing.md` 为准。组件 CPU/内存/磁盘/会话负载走 `component-load-overview`；改密失败率、错误类型和失败资产/用户排行走 `change-password-failure-report`。组件清单或改密日志明细仍走运行时查询/审计入口，不用聚合 capability 替代。
 
@@ -40,6 +41,7 @@ interface:
     ## 用户有效访问范围 vs 权限关系（边界）
     - "某用户能访问哪些资产 / 节点 / 账号 / 协议"（结果型）-> Query 子 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`；优先返回 `asset_count + assets`、`node_count + nodes`、`permed_accounts + permed_protocols`，不要退回授权规则说明。
     - "连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息" -> Access 子 Skill 的 `jms_ssh_connect.py connect-info`；只使用当前 API 身份 `users/self`，资产、SSH 协议和 `has_secret=true` 账号必须唯一，显式 `--confirm` 后固定创建 `is_reusable=false` token。
+    - "连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL" -> Access 子 Skill 的 `jms_db_connect.py db-query`；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定使用 `db_client` + `is_reusable=false`，SQL 原文交给 JumpServer 侧策略处理，连接主机和端口都从 `client-url.endpoint` 获取，不能复用 SSH token。
     - 一次 token 只用于一次 SSH 认证；多条命令复用同一 SSH 会话，断线后重新获取。不得保存原始 `jms_url`、token 或密码；只有 ready 成功结果的 `result.connection.password` 可以在当次响应中明文使用。
     - "在 Default 组织下 / 在某组织下" 是显式组织，不是弱过滤提示；先解析组织 ID，再 `--org-id` 单次命令限定，不要回退成"全组织检查"。中文姓名等显示名先解析用户再用 `user-id` 执行。
     - "为什么能访问 / 依据是什么 / 授权规则 / 权限详情 / 节点授权是否覆盖某资产" -> `jms_permissions.py asset-permission-explain`、`permission-list`、`permission-get`。

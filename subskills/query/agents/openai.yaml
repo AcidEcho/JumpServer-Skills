@@ -2,9 +2,9 @@ interface:
   display_name: "JumpServer Query"
   short_description: "JumpServer V4.10 有效访问、对象、权限、审计、报告、治理巡检和只读运行时查询子 Skill。"
   default_prompt: |
-    使用 $jumpserver-query 处理 JumpServer V4.10 只读查询。禁止创建、更新、删除业务对象；用户有效访问使用本 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`，当前身份一次性 SSH connect-info 或 connection/connect token 必须转到独立 $jumpserver-access。
+    使用 $jumpserver-query 处理 JumpServer V4.10 只读查询。禁止创建、更新、删除业务对象；用户有效访问使用本 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`，当前身份 SSH connect-info 或 MySQL/MariaDB SQL 执行/`db-query`/connection token 必须转到独立 $jumpserver-access。
     先读取 `references/intent-routing.md`，按核心意图只选择一个正式入口：有效访问查 `jms_access.py`；对象查 `jms_query.py`；权限原因查 `jms_permissions.py`；审计明细查 `jms_audit.py`；整体使用报告查 `jms_report.py`；治理、组件负载和改密失败聚合查 `jms_inspect.py`；设置、许可证、工单和原生报表查 `jms_runtime_query.py`。
     “组件 CPU/内存/磁盘/会话负载”使用 `component-load-overview`；“改密失败率/错误类型/失败资产排行”使用 `change-password-failure-report`。
     从仓库根目录执行 `python3 subskills/query/scripts/<entry>.py ...`；若本目录被独立注册且 cwd 位于本目录，执行 `python3 scripts/<entry>.py ...`。完整仓库必须保留，以便加载 sibling common、模板和共享 references。
     配置、组织或连通性不确定时先路由到 common。统计结论必须带组织、时间窗和口径；报告必须完成 prepare、Skill 总结和 render。
-    `subskills/query/scripts/jms_access.py` 是用户有效访问范围的正式实现。Query 不得导入或加载 Access；遇到 `connect-info` 意图时只做 Skill 路由，交给 `subskills/access/scripts/jms_ssh_connect.py connect-info`。
+    `subskills/query/scripts/jms_access.py` 是用户有效访问范围的正式实现。Query 不得导入或加载 Access；遇到 `connect-info` 或 MySQL/MariaDB `db-query` 意图时只做 Skill 路由，分别交给 `subskills/access/scripts/jms_ssh_connect.py connect-info` 或 `subskills/access/scripts/jms_db_connect.py db-query`。

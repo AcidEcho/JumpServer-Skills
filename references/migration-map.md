@@ -16,6 +16,7 @@
 | `subskills/query/scripts/jms_query.py` | 资产、平台、节点、账号、账号模板、用户、用户组、组织、标签、网域查询 | 按对象域集中只读查询 |
 | `subskills/query/scripts/jms_access.py` | 用户资产、节点、账号、协议有效访问范围 | Query 正式实现源；保留 `user-assets`、`user-nodes`、`user-asset-access`，不创建 connection token |
 | `subskills/access/scripts/jms_ssh_connect.py` | 当前身份一次性 SSH 连接信息 | Access 只提供 `connect-info`；与 Query 零代码依赖，双方只共享 Common |
+| `subskills/access/scripts/jms_db_connect.py` | 当前身份通过 MySQL/MariaDB `db_client` 执行 SQL | Access 数据库入口；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，创建不可复用 token，连接主机和端口取 `client-url.endpoint`；SQL 限制由 JumpServer 侧负责；与 Query 零代码依赖 |
 | `subskills/query/scripts/jms_permissions.py` | 授权规则、ACL、RBAC 与资产授权用户查询 | 不承担授权写入 |
 | `subskills/query/scripts/jms_audit.py` | 审计列表、详情、terminal 会话、命令存储提示、能力分析 | 统一承接调查类意图 |
 | `subskills/common/scripts/jms_common.py` | 配置检查、预检、连通性、组织选择、端点验证 | 所有业务 skill 的公共前置能力 |

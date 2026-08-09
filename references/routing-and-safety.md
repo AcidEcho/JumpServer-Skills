@@ -8,6 +8,7 @@
 |---|---|---|
 | 配置、预检、组织选择、连通性、端点验证 | `subskills/common/` | `python3 subskills/common/scripts/jms_common.py ...` |
 | 当前身份一次性 SSH 连接信息 | `subskills/access/` | `python3 subskills/access/scripts/jms_ssh_connect.py connect-info ...` |
+| 当前身份 MySQL/MariaDB SQL 执行 | `subskills/access/` | `python3 subskills/access/scripts/jms_db_connect.py db-query ...` |
 | 用户有效访问范围、对象、权限、审计、报告、巡检、只读运行时数据 | `subskills/query/` | `python3 subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access ...` 或其他 Query 正式入口 |
 | 创建用户、用户组、组织、邀请、标签、节点、资产、网域、网关、账号模板、账号绑定、ACL、资产授权、数据脱敏规则 | `subskills/create/` | 完整命令索引见 `subskills/create/references/index.md`；写入规则见下方“允许写操作”表 |
 | 更新类 | `subskills/update/` | 本版无可执行写操作 |
@@ -27,6 +28,7 @@
 | 本地配置写入 | `jms_common.py config-write --confirm`；损坏恢复追加 `--recover-invalid-env` | 只写 `.env` / `.env.lock`；恢复额外使用 `.env.recovery-*.bak` 和 `.env.recovery-*.stage` |
 | 当前组织切换 | `jms_common.py select-org --confirm` | 只写 `.env JMS_ORG_ID` |
 | 当前身份一次性 SSH connection token | `jms_ssh_connect.py connect-info --confirm` | 只使用 `users/self`；资产、SSH 协议、托管凭据账号必须唯一；固定 `is_reusable=false`；不返回原始 `jms_url`，不持久化 token 或密码 |
+| 当前身份 MySQL/MariaDB SQL 执行 connection token | `jms_db_connect.py db-query --confirm` | 只使用 `users/self` 数据库资产；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定 `db_client` + `is_reusable=false`；SQL 不在本地解析、改写或阻塞，由 JumpServer 命令过滤、连接 ACL 和数据库权限决定；不返回或持久化 token password；主机和端口只取 `client-url.endpoint` |
 | 创建用户 | `jms_create_user.py create-user --confirm` | 密文字段或密文语义字段脱敏；唯一性冲突由服务端校验返回 |
 | 创建用户组 | `jms_create_user_group.py create-user-group --confirm` | 成员只接受用户 ID；唯一性冲突由服务端校验返回 |
 | 创建组织 | `jms_create_org.py create-organization --confirm` | 请求不带 `X-JMS-ORG`，成功后不切换当前组织 |
@@ -54,6 +56,8 @@
 |---|---|
 | 未被上表声明的写操作 | 一律阻塞 |
 | 代替其他用户创建 token、创建可复用 token、绕过审批/Face Verify/ACL | 不开放 |
+| 数据库 token 复用 SSH token，或绕过 `client-url.endpoint` 猜测主机/端口 | 不开放；按 Access 数据库连接 reference 使用 `JMS-<client-token-id>@<endpoint-host>:<endpoint-port>` |
+| 绕过 JumpServer 数据库命令过滤、连接 ACL 或服务端拒绝 | 不开放；`db-query` 只负责透传 SQL，不提供本地绕过能力 |
 | 对象更新、删除、解锁 | 不开放 |
 | 资产、账号、节点、网域、网关、账号模板等对象创建 | 只开放上表列出的 create 入口 |
 | 授权类创建 | 只开放上表列出的命令过滤规则、登录控制、连接方式过滤器、资产授权规则、资产连接规则和数据脱敏过滤规则创建 |

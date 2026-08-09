@@ -1,6 +1,6 @@
 ---
 name: jumpserver-query
-description: JumpServer query-only subskill. Use for current or named-user effective-access results, including accessible assets, nodes, accounts, and protocols; object lookup; permission, RBAC, and ACL explanations; login, session, command, transfer, and job audits; HTML usage reports; governance rankings; component load; password-change failure analysis; and read-only runtime data. Current-identity one-time SSH connect-info and connection/connect token requests belong to the separate jumpserver-access skill.
+description: JumpServer query-only subskill. Use for current or named-user effective-access results, including accessible assets, nodes, accounts, and protocols; object lookup; permission, RBAC, and ACL explanations; login, session, command, transfer, and job audits; HTML usage reports; governance rankings; component load; password-change failure analysis; and read-only runtime data. Current-identity SSH connect-info and MySQL/MariaDB db_client SQL execution or connection-token requests belong to the separate jumpserver-access skill.
 ---
 
 # Query
@@ -95,7 +95,7 @@ description: JumpServer query-only subskill. Use for current or named-user effec
 | 不适用场景 | 处理 |
 |---|---|
 | 创建、更新、删除业务对象 | 转到 create/update 边界并阻塞 |
-| 当前身份 connection token | 转到 Access；Query 不实现 `connect-info`，也不依赖 Access |
+| 当前身份 SSH 或 MySQL/MariaDB connection token | 转到 Access；Query 不实现 `connect-info`/`db-query`，也不依赖 Access |
 | 报告类请求绕过 `jms_report.py` | 阻塞临时拼装 |
 | 对象、组织、时间范围不明确 | 返回候选或要求补充 |
 

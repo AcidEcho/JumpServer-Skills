@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, current-identity one-time SSH connections, template-based usage reports, and controlled object creation. Users do not need to manually compose script commands. Persistent business writes remain limited to allowlisted create entrypoints; Access may create only a short-lived, non-reusable connection token after explicit confirmation, and create output redacts secret fields automatically.
+`jumpserver-skills` is a natural-language operations skill repository for JumpServer V4.10. It supports object lookup, permission readback, audit investigation, governance inspection, access analysis, current-identity SSH/MySQL/MariaDB connections, template-based usage reports, and controlled object creation. Users do not need to manually compose script commands. Persistent business writes remain limited to allowlisted create entrypoints; Access may create only a short-lived, non-reusable connection token after explicit confirmation, and create output redacts secret fields automatically.
 
 [中文](./README.md)
 
@@ -20,6 +20,7 @@ For first-time use, the natural-language `.env` generation path is usually faste
 | Object lookup | "Find this asset/user/account/node/label", "show details for this platform" | `jms_query.py` / `jms_runtime_query.py` | Returns object lists, details, or candidates; asks the user to confirm when an object is ambiguous |
 | User effective access | "Which assets/nodes/accounts/protocols can this user access?" | Query: `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | Returns effective access and never creates a connection token |
 | Current-identity one-time SSH | "Connect to this host through JumpServer" | Access: `subskills/access/scripts/jms_ssh_connect.py connect-info` | Requires a unique asset/managed account and explicit `--confirm`, with a non-reusable token |
+| Current-identity MySQL/MariaDB SQL execution | "Connect to 10.1.12.224 and run SHOW DATABASES" | Access: `subskills/access/scripts/jms_db_connect.py db-query` | Selects one permitted `mysql` or `mariadb` protocol and uses a one-time `db_client` token; forwards SQL to JumpServer policy and never returns the token password |
 | Permission relationship readback | "Who is this asset authorized to?", "why can this user access it?", "show details for this permission rule" | `jms_permissions.py` | Keeps authorization subjects, actual access users, and super-admin impact separate |
 | Audit investigation | "Who failed to log in yesterday?", "query a user's sessions/commands/file transfers", "analyze high-risk commands" | `jms_audit.py` | Queries logs, records, details, or aggregate results under an explicit organization and time window |
 | Governance inspection and access analysis | "Run asset governance inspection", "show component load", "analyze password-change failures", "show access rankings/abnormal behavior" | `jms_inspect.py` / `jms_audit.py` | Uses built-in capability aggregation instead of making users stitch together scattered queries |
@@ -100,6 +101,7 @@ Environment variable rules:
 | Object lookup | "Show details for user `Demo-User`", "show which assets are under node `Demo-Node`", "show available assets on the `Linux` platform" | `jms_query.py` |
 | User effective access scope | "Which assets can this user access in the Default organization?", "which nodes can this user access?", "which accounts and protocols can this user use on this asset?" | Query: `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` |
 | Current-identity one-time SSH | "Connect to 10.1.1.1 through JumpServer", "get SSH information for this host before deployment" | Access: `subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` |
+| Current-identity MySQL/MariaDB SQL execution | "Connect to 10.1.12.224 and run `SHOW DATABASES;` or an update statement" | Access: `subskills/access/scripts/jms_db_connect.py db-query --confirm` |
 | Permission relationship readback | "Who is this asset authorized to?", "why can this user access this asset?", "show details for this permission rule" | `jms_permissions.py` |
 | Audit investigation | "Query login audit for the last week", "show a user's session records and abnormal interruptions", "export command records for a specific day" | `jms_audit.py` |
 | Usage reports | "Show me yesterday's usage", "show who logged in most last week", "check which assets were most active in early March" | `jms_report.py` |
@@ -112,6 +114,7 @@ Ambiguous request wording is handled by these rules:
 |---|---|
 | "Which assets / nodes / accounts / protocols can this user access?" | User effective access scope, returning result lists |
 | "Connect to this host / log in through JumpServer / get one-time SSH information" | Current API identity SSH connection; never issues a token for another user |
+| "Connect to this database / run SHOW DATABASES / run SQL" | Current API identity MySQL/MariaDB `db_client`; never reuses an SSH token; JumpServer controls SQL permission |
 | "Why can this user access it? / permission rule details / authorization basis" | Permission relationship readback, explaining authorization sources |
 | "Who is this asset authorized to? / who is authorized to this asset?" | Answers authorization subjects by default and does not include super admins by default |
 | "Login situation on a day / session overview / who had the most / which were most active" | Usage report or usage analysis |
@@ -163,6 +166,7 @@ In these cases, the skill blocks instead of continuing by guessing:
 | Object name is duplicated, platform is unclear, or organization is unclear | Return candidates and ask the user to confirm |
 | Query results cross organizations, or the current organization differs from the target object's organization | Require an explicit target organization |
 | SSH target asset, protocol, or managed-credential account is not unique | Return candidates or block without creating a connection token |
+| Database token/port shape is wrong, or the user asks to bypass JumpServer SQL policy | Block and follow the Access database connection reference |
 | Multiple organizations are available and no current organization is selected | Return `candidate_orgs` and require organization selection first |
 | User tries to bypass formal entrypoints, skip preflight, or assemble temporary scripts | Block and require formal entrypoints |
 
@@ -174,6 +178,7 @@ In these cases, the skill blocks instead of continuing by guessing:
 | Safety boundaries and allowlist | [references/routing-and-safety.md](./references/routing-and-safety.md) | Formal entrypoint boundaries, allowed write operations, global blocking rules |
 | How query, effective-access, permission, audit, and inspection routing works | [intent-routing.md](./subskills/query/references/intent-routing.md), [routing-playbook.md](./subskills/query/references/routing-playbook.md), [capabilities.md](./subskills/query/references/capabilities.md) | Query intent classification, trigger words, capability catalog, blocking rules, counterexamples |
 | How Access one-time SSH creation and use works | [ssh-connection.md](./subskills/access/references/ssh-connection.md) | `connect-info`, `users/self`, confirmation gate, API flow, token lifecycle, and safety boundaries |
+| How Access connects to MySQL/MariaDB and runs SQL | [database-connection.md](./subskills/access/references/database-connection.md) | `db-query`, protocol selection, `db_client`, `client-url` endpoint, JumpServer SQL policy, and token lifecycle |
 | Component load and password-change failure analysis | [component-load-and-password-report.md](./subskills/query/references/component-load-and-password-report.md) | Metric fields, load thresholds, failure classification, and statistical scope |
 | How usage reports are generated | [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | Template report flow, time ranges, organization priority |
 | Object lookup, permission, and audit details | [assets.md](./subskills/query/references/assets.md), [permissions.md](./subskills/query/references/permissions.md), [audit.md](./subskills/query/references/audit.md), [diagnose.md](./subskills/query/references/diagnose.md) | Asset/account/user/node lookup, authorization relationships, log audit, governance diagnosis |
@@ -185,7 +190,7 @@ In these cases, the skill blocks instead of continuing by guessing:
 
 The following requests are not executed:
 
-- Persistent server-side writes are only open to allowlisted create entrypoints; `connect-info --confirm` may also create an `is_reusable=false` short-lived token for the current identity. Object updates, deletion, unlocking, and non-allowlisted permission creation, changes, or removal are not executed. For the complete scope, see [`references/routing-and-safety.md`](./references/routing-and-safety.md).
+- Persistent server-side writes are only open to allowlisted create entrypoints; Access `connect-info --confirm` and `db-query --confirm` may also create an `is_reusable=false` short-lived token for the current identity. Object updates, deletion, unlocking, and non-allowlisted permission creation, changes, or removal are not executed; database SQL permission is delegated to JumpServer policy and database privileges. For the complete scope, see [`references/routing-and-safety.md`](./references/routing-and-safety.md).
 - Skipping preflight, bypassing formal entrypoints, or using temporary SDK/HTTP scripts for business actions.
 - Continuing by guessing when objects, organizations, or cross-organization relationships are unclear.
 - Bypassing `jms_report.py` for report requests and replacing it with ad hoc assembly logic.
