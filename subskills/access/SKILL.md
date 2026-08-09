@@ -41,11 +41,11 @@ SSH token 创建和使用前读取 [SSH 连接生命周期](references/ssh-conne
 | `connect-info` 目标资产不唯一 | 阻塞，要求唯一资产 ID |
 | 没有唯一 `has_secret=true` 账号 | 阻塞；多个账号时要求 `--account` |
 | 没有 SSH 协议或允许的 SSH 连接方式 | 阻塞，不绕过 ACL |
-| MySQL/MariaDB SQL 执行 | 从资产授权中选择 `mysql` 或 `mariadb`；两者同时存在时按资产平台自动匹配，仍无法区分才要求 `--protocol`；固定使用 `db_client` 和 `is_reusable=false`，连接主机和端口只取 `client-url.endpoint`；SQL 不在本地解析或限制 |
+| MySQL/MariaDB SQL 执行 | 从资产授权中选择 `mysql` 或 `mariadb`；两者同时存在时按资产平台自动匹配，仍无法区分才要求 `--protocol`；固定使用 `db_client` 和 `is_reusable=false`；数据库 `client-url` 只取 token ID/value，连接主机和端口从 Smart Endpoint 动态读取 `host/ssh_port`；SQL 不在本地解析或限制 |
 | SQL 权限或命令过滤 | 交给 JumpServer 连接方式 ACL、命令过滤和数据库账号权限；本入口不绕过服务端拒绝 |
 | 未传 `--confirm` | 只返回 `connection_token_confirmation_required`，不得 POST |
 | token 未激活 | 返回 `pending`，不得请求 `client-url` |
-| MySQL/MariaDB token 与 SSH token | 分别使用选中的数据库协议/`db_client` 与 `ssh` 连接方式；不得交叉使用 |
+| MySQL/MariaDB token 与 SSH token | token 协议和连接方式不同，不得交叉使用；SSH、MySQL、MariaDB 的实际连接传输统一使用 Smart Endpoint 返回的 KoKo SSH `host/ssh_port` |
 
 ## SSH Token 生命周期
 
@@ -58,8 +58,8 @@ SSH token 创建和使用前读取 [SSH 连接生命周期](references/ssh-conne
 ## MySQL/MariaDB Token 生命周期
 
 - `db-query` 为目标数据库资产创建一次性、不可复用的 `mysql` 或 `mariadb` + `db_client` token；省略 `--protocol` 时先从资产授权中选择，两者同时存在则按资产平台自动匹配；必须使用当前 API 身份和 `users/self` 资产。
-- 认证用户名使用 `JMS-<client-token-id>`；连接主机和端口都直接取 `client-url` 的 `endpoint.host/endpoint.port`，不设置固定端口，也不提供本地覆盖参数。
-- token 只用于本次数据库 SSH 认证；脚本在同一交互会话发送一条 SQL 后退出并丢弃凭据，不把 token、密码或原始 URL 写入文件、日志或结果。
+- 认证用户名使用 `JMS-<client-token-id>`；token ID/value 来自数据库 `client-url`。连接主机和端口从 `/api/v1/terminal/endpoints/smart/?asset_id=...&protocol=ssh` 动态读取 `host/ssh_port`，不使用数据库协议对应的 Magnus 端口，不设置固定端口，也不提供本地覆盖参数。
+- token 只用于本次通过 KoKo SSH 服务建立的数据库会话认证；脚本在同一交互会话发送一条 SQL 后退出并丢弃凭据，不把 token、密码或原始 URL 写入文件、日志或结果。
 - `db-query` 结果只返回 SQL 输出和非敏感连接元数据，不返回 token password。`connect-info` 生成的 SSH token 不能用于 MySQL/MariaDB CLI。
 
 ## 边界
@@ -70,7 +70,7 @@ SSH token 创建和使用前读取 [SSH 连接生命周期](references/ssh-conne
 | 为什么能访问、命中哪条授权规则 | 转到 `jms_permissions.py` |
 | 代替其他用户创建 connection token | 阻塞；`connect-info` 只使用 `users/self` |
 | 任意业务对象创建、更新、删除 | 转到 create/update 边界 |
-| 绕过 JumpServer 直接猜 KoKo 地址或端口 | 阻塞；只接受 `client-url` 结果 |
+| 绕过 JumpServer 直接猜 KoKo 地址或端口 | 阻塞；只接受 JumpServer Smart Endpoint API 返回的 SSH `host/ssh_port` |
 | 只想查询资产/账号/协议或授权原因 | 转到 Query；Access 只负责实际连接或数据库终端执行 |
 | 要执行 SQL | 继续走 `db-query`；是否允许执行由 JumpServer 侧策略、ACL 和数据库权限决定 |
 

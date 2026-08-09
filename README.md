@@ -178,7 +178,7 @@ create 的组织规则不在 README 重复展开。需要记住的边界是：�
 | 安全边界和白名单 | [references/routing-and-safety.md](./references/routing-and-safety.md) | 正式入口边界、允许写操作、全局阻塞规则 |
 | 查询、有效访问、权限、审计、巡检怎么路由 | [intent-routing.md](./subskills/query/references/intent-routing.md)、[routing-playbook.md](./subskills/query/references/routing-playbook.md)、[capabilities.md](./subskills/query/references/capabilities.md) | Query 二次意图分类、触发词、能力目录、阻塞规则与反例 |
 | Access 一次性 SSH 怎么创建和使用 | [ssh-connection.md](./subskills/access/references/ssh-connection.md) | `connect-info`、`users/self`、确认门槛、API 流程、token 生命周期和安全边界 |
-| Access MySQL/MariaDB 怎么连接和执行 SQL | [database-connection.md](./subskills/access/references/database-connection.md) | `db-query`、协议自动选择、`db_client`、`client-url` endpoint、JumpServer SQL 策略和 token 生命周期 |
+| Access MySQL/MariaDB 怎么连接和执行 SQL | [database-connection.md](./subskills/access/references/database-connection.md) | `db-query`、协议自动选择、`db_client` token、Smart Endpoint 动态 SSH `host/ssh_port`、JumpServer SQL 策略和 token 生命周期 |
 | 组件负载与改密失败分析 | [component-load-and-password-report.md](./subskills/query/references/component-load-and-password-report.md) | 指标字段、负载阈值、失败识别和统计口径 |
 | 使用报告怎么生成 | [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | 模板化报告流程、时间范围、组织优先级 |
 | 对象查询和权限审计细节 | [assets.md](./subskills/query/references/assets.md)、[permissions.md](./subskills/query/references/permissions.md)、[audit.md](./subskills/query/references/audit.md)、[diagnose.md](./subskills/query/references/diagnose.md) | 资产/账号/用户/节点查询、授权关系、日志审计、治理诊断 |

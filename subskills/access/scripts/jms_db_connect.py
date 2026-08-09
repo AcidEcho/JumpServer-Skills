@@ -55,7 +55,9 @@ DATABASE_PROTOCOL_SELECTION_REQUIRED_REASON_CODE = "database_connection_protocol
 DATABASE_METHOD_UNAVAILABLE_REASON_CODE = "database_connection_method_unavailable"
 DATABASE_CONFIRMATION_REASON_CODE = "database_connection_token_confirmation_required"
 DATABASE_CLIENT_URL_INVALID_REASON_CODE = "database_connection_client_url_invalid"
+DATABASE_SSH_ENDPOINT_INVALID_REASON_CODE = "database_connection_ssh_endpoint_invalid"
 DATABASE_CONNECTION_FAILED_REASON_CODE = "database_connection_failed"
+DATABASE_SMART_ENDPOINT_PATH = "/api/v1/terminal/endpoints/smart/"
 
 
 def _select_database_protocol(
@@ -160,13 +162,52 @@ def _select_database_connection_method(client: Any, protocol: str) -> str:
             payload=build_cli_guidance_payload(
                 DATABASE_METHOD_UNAVAILABLE_REASON_CODE,
                 user_message="当前用户没有可用的 MySQL/MariaDB 数据库客户端连接方式。",
-                action_hint="请检查 Magnus 组件状态、终端组件配置和连接方式 ACL。",
+                action_hint="请检查所选数据库协议、终端组件配置和连接方式 ACL。",
                 protocol=protocol,
                 requested_method=DATABASE_CONNECTION_METHOD,
                 connect_methods=methods,
             ),
         )
     return DATABASE_CONNECTION_METHOD
+
+
+def _resolve_database_ssh_endpoint(client: Any, asset_id: str) -> dict[str, Any]:
+    payload = client.get(
+        DATABASE_SMART_ENDPOINT_PATH,
+        params={"asset_id": asset_id, "protocol": "ssh"},
+    )
+    host = str(payload.get("host") or "").strip() if isinstance(payload, dict) else ""
+    raw_port = payload.get("ssh_port") if isinstance(payload, dict) else None
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError) as exc:
+        raise CLIError(
+            "JumpServer SSH Smart Endpoint returned an invalid SSH service port.",
+            payload=build_cli_guidance_payload(
+                DATABASE_SSH_ENDPOINT_INVALID_REASON_CODE,
+                user_message="JumpServer 返回的 SSH 服务端口无效。",
+                action_hint="检查 KoKo SSH 服务、Smart Endpoint 配置和终端组件状态。",
+                asset_id=asset_id,
+                endpoint_path=DATABASE_SMART_ENDPOINT_PATH,
+            ),
+        ) from exc
+    if not host or not 1 <= port <= 65535:
+        raise CLIError(
+            "JumpServer SSH Smart Endpoint is missing a valid host or SSH service port.",
+            payload=build_cli_guidance_payload(
+                DATABASE_SSH_ENDPOINT_INVALID_REASON_CODE,
+                user_message="JumpServer 未返回有效的 KoKo SSH 服务主机或端口。",
+                action_hint="检查 KoKo SSH 服务、Smart Endpoint 配置和终端组件状态。",
+                asset_id=asset_id,
+                endpoint_path=DATABASE_SMART_ENDPOINT_PATH,
+            ),
+        )
+    return {
+        "id": payload.get("id"),
+        "name": payload.get("name"),
+        "host": host,
+        "port": port,
+    }
 
 
 def _read_channel(channel: Any, *, timeout: float, idle_timeout: float) -> bytes:
@@ -255,7 +296,7 @@ def _execute_database_query(
             payload=build_cli_guidance_payload(
                 DATABASE_CONNECTION_FAILED_REASON_CODE,
                 user_message="无法连接 JumpServer MySQL/MariaDB 数据库终端。",
-                action_hint="检查 client-url endpoint、Magnus 状态和网络可达性。",
+                action_hint="检查 KoKo SSH 服务、Smart Endpoint 和网络可达性。",
                 endpoint={"host": host, "port": port},
                 error_type=type(exc).__name__,
             ),
@@ -342,6 +383,7 @@ def _database_query(args: argparse.Namespace) -> dict[str, Any]:
                 **org_context_output(connection_scope["org_context"]),
             ),
         )
+    ssh_endpoint = _resolve_database_ssh_endpoint(client, asset_id)
     token = client.post(
         CONNECTION_TOKEN_PATH,
         json_body={
@@ -374,15 +416,19 @@ def _database_query(args: argparse.Namespace) -> dict[str, Any]:
             **org_context_output(connection_scope["org_context"]),
         }
     client_url_path = "%s%s/client-url/" % (CONNECTION_TOKEN_PATH, token_id)
-    connection_data = _decode_connection_client_url(client.get(client_url_path))
-    endpoint = connection_data.get("endpoint") or {}
+    try:
+        connection_data = _decode_connection_client_url(client.get(client_url_path))
+    except CLIError as exc:
+        payload = dict(exc.payload)
+        payload.update(
+            build_cli_guidance_payload(
+                DATABASE_CLIENT_URL_INVALID_REASON_CODE,
+                user_message="JumpServer 返回的数据库 token 连接信息无效。",
+                action_hint="检查 JumpServer API 版本和数据库 connection token 状态。",
+            )
+        )
+        raise CLIError(str(exc), payload=payload) from exc
     client_token = connection_data.get("token") or {}
-    endpoint_host = (
-        str(endpoint.get("host") or "").strip()
-        if isinstance(endpoint, dict)
-        else ""
-    )
-    endpoint_port = endpoint.get("port") if isinstance(endpoint, dict) else None
     effective_token_id = (
         str(client_token.get("id") or token_id).strip()
         if isinstance(client_token, dict)
@@ -393,35 +439,19 @@ def _database_query(args: argparse.Namespace) -> dict[str, Any]:
         if isinstance(client_token, dict)
         else str(token.get("value") or "")
     )
-    if (
-        not endpoint_host
-        or not str(endpoint_port or "").strip()
-        or not effective_token_id
-        or not token_value
-    ):
+    if not effective_token_id or not token_value:
         raise CLIError(
-            "Decoded JumpServer client-url payload is missing database connection fields.",
+            "Decoded JumpServer client-url payload is missing database token fields.",
             payload=build_cli_guidance_payload(
                 DATABASE_CLIENT_URL_INVALID_REASON_CODE,
-                user_message="JumpServer 返回的数据库连接信息缺少主机、端口、令牌 ID 或一次性密码。",
-                action_hint="检查 JumpServer API 版本、数据库端点和 connection token 状态。",
+                user_message="JumpServer 返回的数据库连接信息缺少令牌 ID 或一次性密码。",
+                action_hint="检查 JumpServer API 版本和数据库 connection token 状态。",
             ),
         )
-    try:
-        connection_port = int(endpoint_port)
-    except (TypeError, ValueError) as exc:
-        raise CLIError(
-            "Decoded JumpServer client-url payload includes an invalid database endpoint port.",
-            payload=build_cli_guidance_payload(
-                DATABASE_CLIENT_URL_INVALID_REASON_CODE,
-                user_message="JumpServer 返回的数据库连接端口无效。",
-                action_hint="检查 JumpServer 数据库端点配置和 client-url 返回格式。",
-            ),
-        ) from exc
     connection_username = "JMS-%s" % effective_token_id
     output = _execute_database_query(
-        host=endpoint_host,
-        port=connection_port,
+        host=ssh_endpoint["host"],
+        port=ssh_endpoint["port"],
         username=connection_username,
         password=token_value,
         sql=sql,
@@ -437,14 +467,15 @@ def _database_query(args: argparse.Namespace) -> dict[str, Any]:
         "protocol": protocol_name,
         "connect_method": connect_method,
         "connection": {
-            "host": endpoint_host,
-            "port": connection_port,
+            "host": ssh_endpoint["host"],
+            "port": ssh_endpoint["port"],
             "username": connection_username,
             "expires_at": token.get("date_expired"),
             "expires_in_seconds": token.get("expire_time"),
         },
         "data_source": {
             "effective_asset_detail": detail_path,
+            "ssh_endpoint": DATABASE_SMART_ENDPOINT_PATH,
             "connection_token": CONNECTION_TOKEN_PATH,
             "client_url": client_url_path,
         },

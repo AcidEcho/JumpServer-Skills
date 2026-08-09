@@ -41,7 +41,7 @@ interface:
     ## 用户有效访问范围 vs 权限关系（边界）
     - "某用户能访问哪些资产 / 节点 / 账号 / 协议"（结果型）-> Query 子 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`；优先返回 `asset_count + assets`、`node_count + nodes`、`permed_accounts + permed_protocols`，不要退回授权规则说明。
     - "连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息" -> Access 子 Skill 的 `jms_ssh_connect.py connect-info`；只使用当前 API 身份 `users/self`，资产、SSH 协议和 `has_secret=true` 账号必须唯一，显式 `--confirm` 后固定创建 `is_reusable=false` token。
-    - "连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL" -> Access 子 Skill 的 `jms_db_connect.py db-query`；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定使用 `db_client` + `is_reusable=false`，SQL 原文交给 JumpServer 侧策略处理，连接主机和端口都从 `client-url.endpoint` 获取，不能复用 SSH token。
+    - "连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL" -> Access 子 Skill 的 `jms_db_connect.py db-query`；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定使用 `db_client` + `is_reusable=false`，SQL 原文交给 JumpServer 侧策略处理；数据库 `client-url` 只取 token ID/value，连接主机和端口从 `/api/v1/terminal/endpoints/smart/?asset_id=...&protocol=ssh` 动态读取 `host/ssh_port`。SSH、MySQL、MariaDB token 的协议和连接方式不同，不能复用，但实际连接传输统一使用该 KoKo SSH `host/ssh_port`。
     - 一次 token 只用于一次 SSH 认证；多条命令复用同一 SSH 会话，断线后重新获取。不得保存原始 `jms_url`、token 或密码；只有 ready 成功结果的 `result.connection.password` 可以在当次响应中明文使用。
     - "在 Default 组织下 / 在某组织下" 是显式组织，不是弱过滤提示；先解析组织 ID，再 `--org-id` 单次命令限定，不要回退成"全组织检查"。中文姓名等显示名先解析用户再用 `user-id` 执行。
     - "为什么能访问 / 依据是什么 / 授权规则 / 权限详情 / 节点授权是否覆盖某资产" -> `jms_permissions.py asset-permission-explain`、`permission-list`、`permission-get`。

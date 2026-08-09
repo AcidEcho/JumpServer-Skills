@@ -78,5 +78,5 @@ query 子 Skill 触发后必须继续按 [查询意图路由](subskills/query/re
 - 已说明目标子 Skill 和正式入口。
 - 已说明写操作是否需要 `--confirm`。
 - `connect-info` 已说明一次性 SSH 认证生命周期和明文密码例外。
-- MySQL/MariaDB `db-query` 已说明协议选择、`db_client` token、`client-url.endpoint` 主机/端口、JumpServer 侧 SQL 策略和 token password 不回显。
+- MySQL/MariaDB `db-query` 已说明协议选择、`db_client` token、Smart Endpoint 动态 SSH `host/ssh_port`、JumpServer 侧 SQL 策略和 token password 不回显。
 - 阻塞时返回原因、候选对象/组织和下一步安全动作。

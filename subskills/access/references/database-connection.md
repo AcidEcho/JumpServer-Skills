@@ -23,7 +23,8 @@ python3 subskills/access/scripts/jms_db_connect.py db-query \
 3. 从资产授权协议中选择 `mysql` 或 `mariadb`；两者同时存在时按资产平台名称/slug 自动匹配，平台信息仍无法区分时才要求通过 `--protocol` 明确选择。
 4. 从 `/api/v1/terminal/components/connect-methods/?os=linux` 选择所选数据库协议下的 `db_client`。
 5. 未传 `--confirm` 时只返回确认提示，不创建 token。
-6. 确认后 POST `/api/v1/authentication/connection-token/`，固定使用：
+6. 确认后调用 `GET /api/v1/terminal/endpoints/smart/?asset_id=<asset-id>&protocol=ssh`，动态取得 KoKo SSH 服务的 `host` 和 `ssh_port`；缺失或无效时在创建 token 前阻塞。
+7. POST `/api/v1/authentication/connection-token/`，固定使用：
 
 ```json
 {
@@ -36,11 +37,11 @@ python3 subskills/access/scripts/jms_db_connect.py db-query \
 }
 ```
 
-7. 读取并解码 `client-url`，得到数据库连接 token；不把原始 `jms_url` 写入文件或输出。
-8. 与 `jms_ssh_connect.py` 一致，直接使用 `client-url` 解码结果中的 `endpoint.host/endpoint.port` 建立连接；不写死端口，也不提供本地自定义主机/端口参数。
-9. 在同一交互会话发送 `--sql` 原文，读取输出后发送 `\\q` 关闭会话。
+8. 读取并解码 `client-url`，只取得数据库连接 token ID 和一次性密码；不把原始 `jms_url` 写入文件或输出，也不使用其中数据库协议对应的 Magnus endpoint 端口。
+9. 使用 Smart Endpoint 返回的 SSH `host/ssh_port` 建立 Paramiko 连接；端口由 JumpServer 动态返回，不写死，也不提供本地自定义主机/端口参数。
+10. 在同一交互会话发送 `--sql` 原文，读取输出后发送 `\\q` 关闭会话。
 
-内部连接形态为 `JMS-<client-token-id>@<endpoint-host>:<endpoint-port>`，主机、端口、token ID 和密码都来自本次 `client-url`。脚本只在内存中使用密码，不在 JSON 结果中回显；SSH `connect-info` token 不能替代数据库 token。
+内部连接形态为 `JMS-<client-token-id>@<ssh-host>:<ssh-port>`。`ssh-host/ssh-port` 来自 Smart Endpoint API，token ID 和密码来自本次数据库 `client-url`。脚本只在内存中使用密码，不在 JSON 结果中回显；SSH `connect-info` token 不能替代数据库 token。
 
 ## 安全边界
 
@@ -59,11 +60,12 @@ python3 subskills/access/scripts/jms_db_connect.py db-query \
 | `database_connection_account_selection_required` | 是否存在唯一 `has_secret=true` 账号 |
 | `database_connection_protocol_unavailable` | 资产是否启用 MySQL/MariaDB 协议，当前用户是否有权限 |
 | `database_connection_protocol_selection_required` | 资产同时启用 MySQL 和 MariaDB，且平台信息无法区分，需通过 `--protocol` 明确选择 |
-| `database_connection_method_unavailable` | Magnus、所选数据库协议的 `db_client` 和连接方式 ACL |
-| `database_connection_failed` | db_client SSH 主机/端口、Magnus 状态和网络 |
+| `database_connection_method_unavailable` | 所选数据库协议的 `db_client` 和连接方式 ACL |
+| `database_connection_ssh_endpoint_invalid` | Smart Endpoint 是否返回有效的 KoKo SSH `host/ssh_port` |
+| `database_connection_failed` | KoKo SSH 服务、Smart Endpoint 和网络可达性 |
 
 ## 生命周期
 
-- 一次 token 只允许一次数据库 SSH 认证；本入口按 `--sql` 原文发送，不在本地限制语句数量。
+- 一次 token 只允许一次通过 KoKo SSH 服务建立的数据库会话认证；本入口按 `--sql` 原文发送，不在本地限制语句数量。
 - 会话关闭、超时或断开后丢弃旧 token，重新调用 `db-query`。
-- 数据库 token 与 `connect-info` 的 SSH token 协议、连接方式和目标终端不同，不复用、不互换。
+- SSH、MySQL、MariaDB token 的协议和连接方式不同，不复用、不互换；实际连接传输统一使用 Smart Endpoint 返回的 KoKo SSH `host/ssh_port`。
