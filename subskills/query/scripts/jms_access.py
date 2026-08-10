@@ -175,6 +175,61 @@ def _list_permissions(*, client=None) -> list[dict[str, Any]]:
     return [item for item in payload if isinstance(item, dict)] if isinstance(payload, list) else []
 
 
+def _collect_matched_permissions(
+    client,
+    user: dict[str, Any],
+    *,
+    assets: list[dict[str, Any]],
+    node_lookup,
+) -> tuple[list[dict[str, Any]], set[str], set[str]]:
+    user_id = str(user.get("id") or "").strip()
+    user_group_ids = {
+        str(item.get("id", item)).strip()
+        for item in user.get("groups", []) or []
+        if str(item.get("id", item) if isinstance(item, dict) else item).strip()
+    }
+    permed_accounts: set[str] = set()
+    permed_protocols: set[str] = set()
+    matched_permissions: list[dict[str, Any]] = []
+    for item in _list_permissions(client=client):
+        permission_id = str(item.get("id") or "").strip()
+        if not permission_id:
+            continue
+        detail = client.get("%s%s/" % (PERMISSION_PATH, permission_id))
+        user_ids = {str(obj.get("id", obj)) for obj in detail.get("users", [])}
+        group_ids = {str(obj.get("id", obj)) for obj in detail.get("user_groups", [])}
+        if user_id not in user_ids and not (group_ids & user_group_ids):
+            continue
+        match = None
+        for asset in assets:
+            if not isinstance(asset, dict):
+                continue
+            match = match_permission_to_asset(detail, asset, node_lookup=node_lookup)
+            if match:
+                break
+        if not match:
+            continue
+        matched_permissions.append(
+            {
+                "id": detail.get("id"),
+                "name": detail.get("name"),
+                "match_source": match["match_source"],
+                "match_evidence": match["match_evidence"],
+            }
+        )
+        for account in detail.get("accounts", []):
+            if isinstance(account, dict):
+                permed_accounts.add(str(account.get("name") or account.get("username") or account.get("id")))
+            else:
+                permed_accounts.add(str(account))
+        for protocol in detail.get("protocols", []):
+            if isinstance(protocol, dict):
+                permed_protocols.add(str(protocol.get("name") or protocol.get("value") or protocol.get("label")))
+            else:
+                permed_protocols.add(str(protocol))
+    return matched_permissions, permed_accounts, permed_protocols
+
+
 def _require_exactly_one_selector(*, values: dict[str, str | None], message: str) -> None:
     provided = [name for name, value in values.items() if str(value or "").strip()]
     if len(provided) != 1:
@@ -326,7 +381,7 @@ def _fetch_effective_access_records(client, path: str, *, resource: str, params=
     return collected, len(collected), reported_total, warnings
 
 
-def _effective_user_access(user: dict[str, Any], *, client=None, org_context=None) -> dict[str, Any]:
+def _effective_user_access(user: dict[str, Any], *, client=None, discovery=None, org_context=None) -> dict[str, Any]:
     active_client = client or create_client()
     user_id = str(user.get("id") or "")
     assets_path = "/api/v1/perms/users/%s/assets/" % user_id
@@ -345,12 +400,28 @@ def _effective_user_access(user: dict[str, Any], *, client=None, org_context=Non
         resource="nodes",
         params=node_params,
     )
+    if assets:
+        matched_permissions, permed_accounts, permed_protocols = _collect_matched_permissions(
+            active_client,
+            user,
+            assets=assets,
+            node_lookup=build_node_lookup(discovery=discovery),
+        )
+    else:
+        matched_permissions, permed_accounts, permed_protocols = [], set(), set()
     result = {
         "asset_count": asset_count,
         "node_count": node_count,
         "assets": assets,
         "nodes": nodes,
-        "matched_permissions": [],
+        "matched_permissions": matched_permissions,
+        "permed_accounts": sorted(permed_accounts),
+        "permed_protocols": sorted(permed_protocols),
+        "matched_permissions_note": (
+            "Configured rules in effective_org that match the user or user groups and at least one returned "
+            "effective asset. Assets and nodes remain authoritative for current effective access; account "
+            "availability is not guaranteed."
+        ),
         "data_source": {
             "assets_endpoint": assets_path,
             "assets_params": asset_params,
@@ -358,6 +429,7 @@ def _effective_user_access(user: dict[str, Any], *, client=None, org_context=Non
             "nodes_endpoint": nodes_path,
             "nodes_params": node_params,
             "nodes_reported_total": reported_node_count,
+            "permissions_endpoint": PERMISSION_PATH,
         },
         "warnings": [*asset_warnings, *node_warnings],
     }
@@ -376,6 +448,7 @@ def _user_assets(args: argparse.Namespace) -> dict[str, Any]:
         **_effective_user_access(
             user,
             client=query_scope["client"],
+            discovery=query_scope["discovery"],
             org_context=query_scope["org_context"],
         ),
     }
@@ -389,6 +462,7 @@ def _user_nodes(args: argparse.Namespace) -> dict[str, Any]:
         "node_count": result["node_count"],
         "nodes": result["nodes"],
         "matched_permissions": result["matched_permissions"],
+        "matched_permissions_note": result["matched_permissions_note"],
         "data_source": result["data_source"],
         "warnings": result["warnings"],
         "effective_org": result.get("effective_org"),
@@ -406,42 +480,14 @@ def _user_asset_access(args: argparse.Namespace) -> dict[str, Any]:
     client = query_scope["client"]
     discovery = query_scope["discovery"]
     user = _resolve_user(args.user_id, args.username, discovery=discovery)
-    user_group_ids = {str(item.get("id", item)) for item in user.get("groups", [])}
     asset = _resolve_asset(args.asset_id, args.asset_name, discovery=discovery)
     node_lookup = build_node_lookup(discovery=discovery)
-    permed_accounts = set()
-    permed_protocols = set()
-    matched_permissions = []
-    for item in _list_permissions(client=client):
-        permission_id = str(item.get("id") or "").strip()
-        if not permission_id:
-            continue
-        detail = client.get("/api/v1/perms/asset-permissions/%s/" % permission_id)
-        user_ids = {str(obj.get("id", obj)) for obj in detail.get("users", [])}
-        group_ids = {str(obj.get("id", obj)) for obj in detail.get("user_groups", [])}
-        if str(user.get("id")) not in user_ids and not (group_ids & user_group_ids):
-            continue
-        match = match_permission_to_asset(detail, asset, node_lookup=node_lookup)
-        if not match:
-            continue
-        matched_permissions.append(
-            {
-                "id": detail.get("id"),
-                "name": detail.get("name"),
-                "match_source": match["match_source"],
-                "match_evidence": match["match_evidence"],
-            }
-        )
-        for account in detail.get("accounts", []):
-            if isinstance(account, dict):
-                permed_accounts.add(str(account.get("name") or account.get("username") or account.get("id")))
-            else:
-                permed_accounts.add(str(account))
-        for protocol in detail.get("protocols", []):
-            if isinstance(protocol, dict):
-                permed_protocols.add(str(protocol.get("name") or protocol.get("value") or protocol.get("label")))
-            else:
-                permed_protocols.add(str(protocol))
+    matched_permissions, permed_accounts, permed_protocols = _collect_matched_permissions(
+        client,
+        user,
+        assets=[asset],
+        node_lookup=node_lookup,
+    )
     return {
         "user": user,
         "asset": asset,
@@ -518,4 +564,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

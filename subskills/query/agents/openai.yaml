@@ -8,3 +8,4 @@ interface:
     从仓库根目录执行 `python3 subskills/query/scripts/<entry>.py ...`；若本目录被独立注册且 cwd 位于本目录，执行 `python3 scripts/<entry>.py ...`。完整仓库必须保留，以便加载 sibling common、模板和共享 references。
     配置、组织或连通性不确定时先路由到 common。统计结论必须带组织、时间窗和口径；报告必须完成 prepare、Skill 总结和 render。
     `subskills/query/scripts/jms_access.py` 是用户有效访问范围的正式实现。Query 不得导入或加载 Access；遇到 `connect-info` 或 MySQL/MariaDB `db-query` 意图时只做 Skill 路由，分别交给 `subskills/access/scripts/jms_ssh_connect.py connect-info` 或 `subskills/access/scripts/jms_db_connect.py db-query`。
+    `user-assets` / `user-nodes` 的资产与节点清单以 `effective_org` 下的 effective access 接口为准；授权规则、账号和协议汇总只作同组织配置解释，不等同于每台资产的最终可连接性。

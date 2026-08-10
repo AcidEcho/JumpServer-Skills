@@ -7,6 +7,8 @@ description: JumpServer query-only subskill. Use for current or named-user effec
 
 查询类能力集中在本子 Skill。禁止创建、更新、删除。用户有效访问范围由本目录 `jms_access.py` 的 `user-assets`、`user-nodes`、`user-asset-access` 正式提供；当前身份一次性 SSH 连接转到独立 [Access](../access/SKILL.md)。Query 不得导入或加载 Access。
 
+`user-assets` / `user-nodes` 的资产与节点清单以当前 `effective_org` 下的 effective access 接口为准；`matched_permissions`、`permed_accounts`、`permed_protocols` 仅解释同组织内命中用户/用户组及返回资产的配置规则，不代表每台资产都具备唯一托管账号或可直接连接。
+
 若本目录被独立注册为 Skill 根目录，使用 [agents/openai.yaml](agents/openai.yaml)；从本目录 cwd 执行 `python3 scripts/<entry>.py ...`。该模式仍要求完整仓库存在，详见 [子 Skill 独立注册](../../references/subskill-registration.md)。
 
 ## 输入 / 输出

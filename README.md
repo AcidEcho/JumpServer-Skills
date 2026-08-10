@@ -18,7 +18,7 @@
 |---|---|---|---|
 | 环境预检与组织选择 | “检查配置是否可用”“测试连通性”“切到 Default 组织” | `jms_common.py` | 先确认 `.env`、认证、组织和端点；本地写入仅限 `.env`、`.env.lock` 及 `.env.recovery-*` 恢复文件 |
 | 对象查询 | “查这个资产/用户/账号/节点/标签”“看某个平台详情” | `jms_query.py` / `jms_runtime_query.py` | 返回对象清单、详情或候选项；对象不唯一时先让使用者确认 |
-| 用户有效访问范围 | “某用户能访问哪些资产/节点/账号/协议” | Query 的 `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | 返回 effective access，不创建 connection token |
+| 用户有效访问范围 | “某用户能访问哪些资产/节点/账号/协议” | Query 的 `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | 返回 effective access，并在当前组织内附授权规则解释；不创建 connection token |
 | 当前身份一次性 SSH | “通过 JumpServer 连接这台机器” | Access 的 `subskills/access/scripts/jms_ssh_connect.py connect-info` | 必须唯一选择资产/托管账号并显式 `--confirm`，token 固定不可复用 |
 | 当前身份 MySQL/MariaDB SQL 执行 | “连接 10.1.12.224 执行 SHOW DATABASES” | Access 的 `subskills/access/scripts/jms_db_connect.py db-query` | 从资产授权中唯一选择 `mysql` 或 `mariadb`，使用 `db_client` 一次性 token；SQL 原文交给 JumpServer 策略处理，不返回 token password |
 | 当前身份 SSH 命令执行 | “通过 JumpServer 在这台机器执行 hostname” | Access 的 `subskills/access/scripts/jms_ssh_exec.py ssh-exec` | 显式确认后一次认证，多条命令复用同一个 SSH 客户端；不调用本地 shell，不返回一次性密码 |

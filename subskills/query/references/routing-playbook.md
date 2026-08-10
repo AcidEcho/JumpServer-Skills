@@ -219,7 +219,7 @@
 - 回显生效组织（`effective_org`）
 - 有其他可切换组织时回显可切换组织（`switchable_orgs`）
 - 回显执行命令摘要
-- 返回 `asset_count` + `assets`，或 `node_count` + `nodes`，或 `permed_accounts` + `permed_protocols`
+- 返回 `asset_count` + `assets`，或 `node_count` + `nodes`，或 `permed_accounts` + `permed_protocols`；同时回显当前组织内的 `matched_permissions` 配置解释，不把规则汇总表述成每台资产的最终可连接性
 
 当前身份 SSH 连接：只返回 Access 路由，不在 Query 内执行 `connect-info` 或创建 token；具体流程读取 [Access SSH 连接生命周期](../../access/references/ssh-connection.md)。
 

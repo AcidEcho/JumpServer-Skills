@@ -20,8 +20,8 @@
 | `select-org` | 查看、解析和预览组织 | 可选 `--org-id` / `--org-name` | `candidate_orgs`、`effective_org`、`switchable_orgs` |
 | `resolve` | 把自然语言名称解析成对象 | `--resource` + `--name` 或 `--id` | 规范对象 |
 | `resolve-platform` | 解析平台名称或分类 | `--value` | `status`、`resolved`、候选平台 |
-| `jms_access.py user-assets` | 查用户当前可访问资产 | `--user-id` 或 `--username` | `asset_count`、`assets` |
-| `jms_access.py user-nodes` | 查用户当前可访问节点 | `--user-id` 或 `--username` | `node_count`、`nodes` |
+| `jms_access.py user-assets` | 查用户当前可访问资产 | `--user-id` 或 `--username` | `asset_count`、`assets`、`matched_permissions`、`permed_accounts`、`permed_protocols` |
+| `jms_access.py user-nodes` | 查用户当前可访问节点 | `--user-id` 或 `--username` | `node_count`、`nodes`、`matched_permissions` |
 | `jms_access.py user-asset-access` | 查用户在某资产下的账号与协议 | 一个用户定位 + 一个资产定位 | `permed_accounts`、`permed_protocols` |
 | `jms_permissions.py asset-permission-explain` | 从资产视角解释命中的授权规则 | `--asset-id` 或 `--asset-name` | `matched_permissions`、`match_source` |
 | `jms_audit.py recent-audit` | 快速看最近审计 | `--audit-type` + 页面同款参数 | 最近事件列表，包含 `data_sources` 与 `filter_strategies` 摘要 |
@@ -46,6 +46,8 @@
 
 - `user-assets` 从 `/api/v1/perms/users/{user_id}/assets/` 获取用户当前可访问资产。
 - `user-nodes` 从 `/api/v1/perms/users/{user_id}/nodes/` 获取用户当前可访问节点。
+- `matched_permissions` 只汇总当前 `effective_org` 内命中用户/用户组、且至少覆盖一台返回资产的配置规则；不会跨组织聚合。
+- `assets` / `nodes` 才是当前有效访问范围的权威结果。`permed_accounts` / `permed_protocols` 是命中规则的并集，不代表每台资产都具备唯一托管账号或满足最终连接条件。
 - `user-assets`、`user-nodes`、`user-asset-access` 都支持额外传 `--org-id` 或 `--org-name`，只在当前命令内临时限定查询组织，不会写回 `.env`。
 - 结果里会保留 `effective_org`、`switchable_orgs`、`data_source` 等上下文字段，便于排查“结果查到哪里去了”。
 
