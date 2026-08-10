@@ -1,5 +1,7 @@
 # MySQL/MariaDB 数据库连接与 SQL 执行
 
+本 reference 只约束兼容的 MySQL/MariaDB `db-query`。PostgreSQL、Redis、MongoDB、SQL Server、Oracle 和 ClickHouse 使用独立的 `jms_db_exec.py`，见 [KoKo 多协议连接与命令执行](koko-execution.md)。
+
 ## 适用场景
 
 - 用户要通过 JumpServer 连接已授权 MySQL 或 MariaDB 资产。

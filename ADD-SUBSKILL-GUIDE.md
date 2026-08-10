@@ -9,7 +9,7 @@
 | 现有查询意图下新增一个统计、排行或巡检 | `query` capability：handler + metadata + reference + test |
 | 现有对象增加清单、详情或解析 | `jms_query.py` 与 `object-map.md` |
 | 新增用户有效访问命令 | `query` 域；实现放在 `subskills/query/scripts/jms_access.py`，保持 `user-assets/user-nodes/user-asset-access` 为 Query 正式能力 |
-| 新增当前身份 SSH / MySQL/MariaDB 连接命令 | `access` 域；SSH 实现在 `subskills/access/scripts/jms_ssh_connect.py`，数据库 SQL 执行实现在 `subskills/access/scripts/jms_db_connect.py`；Access 与 Query 只共享 Common，双方不得互相导入或加载 |
+| 新增当前身份连接或执行命令 | `access` 域；兼容 SSH/MySQL/MariaDB 入口保持独立，新协议优先新增脚本并复用 `jms_koko_connection.py`；Access 与 Query 只共享 Common，双方不得互相导入或加载 |
 | 新增权限、审计或只读运行时命令 | 对应 query 入口；不要全部塞进 `jms_query.py` |
 | 新增允许的创建命令 | `subskills/create/scripts/` + 独立 reference + 全局白名单 |
 | 新增更新类命令 | 先完成安全设计和用户授权，再替换 `update` 预留边界 |
@@ -99,6 +99,7 @@ subskills/<domain>/
 | query 二次意图路由 | `subskills/query/references/intent-routing.md` |
 | 当前身份 SSH API 流程和 token 生命周期 | `subskills/access/references/ssh-connection.md` |
 | 当前身份 MySQL/MariaDB API 流程和 token 生命周期 | `subskills/access/references/database-connection.md` |
+| 当前身份 KoKo SSH/多数据库连接与执行 | `subskills/access/references/koko-execution.md` |
 | 运行时和组织行为 | `subskills/common/references/runtime.md` |
 | 使用报告流程 | `subskills/query/references/report-template-playbook.md` |
 

@@ -10,6 +10,8 @@
 | 有效访问范围 | 某用户现在能访问哪些资产/节点/账号/协议 | Query：`python3 subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | [诊断与访问分析](diagnose.md) |
 | 当前身份 SSH 连接 | 连接这台机器、通过 JumpServer 登录、获取一次性 SSH 信息、先连接再执行远程任务 | 独立 Access：`python3 subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` | [SSH 连接生命周期](../../access/references/ssh-connection.md) |
 | 当前身份 MySQL/MariaDB SQL 执行 | 连接数据库、执行 `SHOW DATABASES`、执行 SQL | 独立 Access：`python3 subskills/access/scripts/jms_db_connect.py db-query --confirm` | [数据库连接与 SQL 执行](../../access/references/database-connection.md) |
+| 当前身份 SSH 命令执行 | 通过 JumpServer 执行远程命令、执行 hostname、连接后执行部署 | 独立 Access：`python3 subskills/access/scripts/jms_ssh_exec.py ssh-exec --confirm` | [KoKo 多协议连接与命令执行](../../access/references/koko-execution.md) |
+| 当前身份多数据库连接/执行 | 连接 PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse 或执行对应命令 | 独立 Access：`jms_connect.py connect-info` / `jms_db_exec.py db-exec` | [KoKo 多协议连接与命令执行](../../access/references/koko-execution.md) |
 | 权限解释 | 为什么能访问、命中哪些授权规则、资产授权给谁、RBAC/ACL | `jms_permissions.py` | [permissions.md](permissions.md) |
 | 审计调查 | 登录、会话、命令、文件传输、作业的明细、单人次数或取证 | `jms_audit.py` | [audit.md](audit.md) |
 | 使用报告 | 某天/时间段整体使用情况、日报/周报/月报、总体排行与分布 | `jms_report.py daily-usage-prepare` -> Skill 总结 -> `daily-usage-render` | [report-template-playbook.md](report-template-playbook.md) |
@@ -37,6 +39,7 @@
 5. 深层 reference 按上表按需读取，不默认加载全部查询文档。
 6. 当前身份 SSH 请求只路由到 Access；Query 不执行 `connect-info`，也不导入 Access。
 7. 当前身份 MySQL/MariaDB 查询请求同样只路由到 Access；Query 不创建数据库 connection token，也不执行 `db-query`。
+8. 当前身份 SSH 命令和新增数据库协议执行只路由到 Access；Query 不执行 `ssh-exec`、`connect-info` 或 `db-exec`。
 
 ## 路由验收样例
 
@@ -59,6 +62,8 @@
 - “通过 JumpServer 连接 10.1.1.1。”
 - “先拿这台机器的一次性 SSH 信息，再执行部署。”
 - “在 10.1.12.224 上执行 `SHOW DATABASES;`。”
+- “通过 JumpServer 在 prod-host 执行 `hostname`。”
+- “在 PostgreSQL 执行 `SELECT version();`，或在 Redis 执行 `PING`。”
 
 以下请求仍留在 Query：
 

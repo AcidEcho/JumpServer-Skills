@@ -2,9 +2,10 @@
 name: jumpserver-skills
 description: >
   JumpServer V4.10 main routing skill. Use for JumpServer queries, user effective-access
-  scope, current-identity one-time SSH connect-info, connection/connect tokens,
+  scope, current-identity one-time SSH/database connect-info, safe same-process SSH execution,
+  connection/connect tokens,
   permissions, audit logs, reports, inspections, runtime config checks, connectivity,
-  current-identity MySQL/MariaDB db_client SQL execution,
+  current-identity MySQL/MariaDB SQL and PostgreSQL/Redis/MongoDB/SQL Server/Oracle/ClickHouse execution,
   organization selection, allowed create workflows, and reserved update requests.
   中文创建触发词：创建用户、创建用户组、创建组织、邀请用户、添加用户到用户组、创建标签、
   创建节点、创建主机资产、创建网络设备资产、创建数据库资产、创建 Web 资产、创建网域、
@@ -31,6 +32,8 @@ description: >
 | 配置检查、预检、组织选择、连通性、端点验证 | [subskills/common/SKILL.md](subskills/common/SKILL.md) | `jms_common.py config-status` / `ping` / `select-org` / `endpoint-verify` |
 | 当前身份一次性 SSH 连接信息 | [subskills/access/SKILL.md](subskills/access/SKILL.md) | `python3 subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` |
 | 当前身份 MySQL/MariaDB SQL 执行 | [subskills/access/SKILL.md](subskills/access/SKILL.md) | `python3 subskills/access/scripts/jms_db_connect.py db-query --sql 'SHOW DATABASES;' --confirm` |
+| 当前身份多协议连接信息与 SSH 命令执行 | [subskills/access/SKILL.md](subskills/access/SKILL.md) | `jms_connect.py connect-info` / `jms_ssh_exec.py ssh-exec` |
+| PostgreSQL/Redis/MongoDB/SQL Server/Oracle/ClickHouse 命令执行 | [subskills/access/SKILL.md](subskills/access/SKILL.md) | `jms_db_exec.py db-exec --protocol <protocol> --command <command> --confirm` |
 | 用户有效访问范围、对象、权限、审计、报告、巡检、只读运行时数据 | [subskills/query/SKILL.md](subskills/query/SKILL.md) | `jms_access.py user-assets` / `user-nodes` / `user-asset-access`，以及 `jms_query.py` / `jms_permissions.py` / `jms_audit.py` / `jms_inspect.py` / `jms_runtime_query.py` / `jms_report.py` |
 | 创建类 | [subskills/create/SKILL.md](subskills/create/SKILL.md) | 完整索引见 [subskills/create/references/index.md](subskills/create/references/index.md) |
 | 更新类预留 | [subskills/update/SKILL.md](subskills/update/SKILL.md) | 本版无可执行业务更新 |
@@ -56,7 +59,9 @@ query 子 Skill 触发后必须继续按 [查询意图路由](subskills/query/re
 | 未被白名单声明的业务写操作 | 阻塞 |
 | 已开放 create 写操作 | 必须追加 `--confirm` 才真实写入 |
 | 当前身份一次性 SSH 信息 | 只允许 `jms_ssh_connect.py connect-info --confirm` 创建 `is_reusable=false` token；资产、协议和托管账号必须唯一 |
-| 当前身份 MySQL/MariaDB SQL 执行 | 只允许 `jms_db_connect.py db-query --confirm` 从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，并创建 `db_client`、`is_reusable=false` token；SQL 限制由 JumpServer 侧执行，不返回数据库 token password |
+| 当前身份 MySQL/MariaDB SQL 执行 | 只允许 `jms_db_connect.py db-query --confirm` 从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，并创建 `db_client`、`is_reusable=false` token；SSH、MySQL、MariaDB token 的协议和连接方式不同，不能复用，但实际连接传输统一使用 Smart Endpoint 返回的 KoKo SSH `host/ssh_port`；SQL 限制由 JumpServer 侧执行，不返回数据库 token password |
+| 当前身份 SSH 命令执行 | 只允许 `jms_ssh_exec.py ssh-exec --confirm`；使用 `users/self`、一次性不可复用 token，在同一进程认证一次并复用单个 SSH 客户端，不把命令交给本地 shell |
+| 新增数据库协议命令执行 | 只允许 `jms_db_exec.py db-exec --confirm`；协议必须精确存在于资产授权；PostgreSQL/Redis/MongoDB/SQL Server/Oracle 固定 `db_client`，ClickHouse 固定 `web_cli`；统一使用 Smart Endpoint 返回的 KoKo SSH `host/ssh_port`，不返回数据库 token password |
 | 本地运行时写入 | 只允许 `config-write --confirm`、`config-write --recover-invalid-env --confirm`、`select-org --confirm`；并发锁限 `.env.lock`，恢复文件限 `.env.recovery-*.bak` / `.env.recovery-*.stage` |
 | dry-run、成功、错误输出 | 默认不回显 `secret`、`passphrase`、`private_key`、`access_key`、`api_key`、`token`、`password`；唯一例外是 `connect-info` ready 结果的 `result.connection.password` |
 | 对象 ID、平台 ID、组织、鉴权信息或筛选条件不明确 | 先查询或解析，不猜 |
@@ -71,6 +76,7 @@ query 子 Skill 触发后必须继续按 [查询意图路由](subskills/query/re
 | 报告类请求要求绕过 `jms_report.py` 正式入口 | 阻塞临时拼装 |
 | 跨组织对象不明确 | 返回候选或要求用户明确组织 |
 | 数据库 token 与 SSH token 混用，或要求绕过 JumpServer SQL/命令策略 | 阻塞；按 Access 数据库边界处理 |
+| 通过固定 Magnus 端口、本地覆盖主机端口或跨进程复用一次性凭据 | 阻塞；所有新增数据库协议只使用动态 KoKo SSH Smart Endpoint，执行后立即丢弃凭据 |
 
 ## 成功标准
 
@@ -78,5 +84,6 @@ query 子 Skill 触发后必须继续按 [查询意图路由](subskills/query/re
 - 已说明目标子 Skill 和正式入口。
 - 已说明写操作是否需要 `--confirm`。
 - `connect-info` 已说明一次性 SSH 认证生命周期和明文密码例外。
-- MySQL/MariaDB `db-query` 已说明协议选择、`db_client` token、Smart Endpoint 动态 SSH `host/ssh_port`、JumpServer 侧 SQL 策略和 token password 不回显。
+- MySQL/MariaDB `db-query` 已说明协议选择、`db_client` token、token 不复用、Smart Endpoint 动态 SSH `host/ssh_port`、统一 KoKo SSH 传输、JumpServer 侧 SQL 策略和 token password 不回显。
+- `ssh-exec` 已说明单次认证和同会话复用；新增数据库协议已说明连接方式选择、Smart Endpoint、协议专用退出命令和不回显 token password。
 - 阻塞时返回原因、候选对象/组织和下一步安全动作。

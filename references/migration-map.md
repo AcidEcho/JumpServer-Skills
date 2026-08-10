@@ -17,6 +17,10 @@
 | `subskills/query/scripts/jms_access.py` | 用户资产、节点、账号、协议有效访问范围 | Query 正式实现源；保留 `user-assets`、`user-nodes`、`user-asset-access`，不创建 connection token |
 | `subskills/access/scripts/jms_ssh_connect.py` | 当前身份一次性 SSH 连接信息 | Access 只提供 `connect-info`；与 Query 零代码依赖，双方只共享 Common |
 | `subskills/access/scripts/jms_db_connect.py` | 当前身份通过 MySQL/MariaDB `db_client` 执行 SQL | Access 数据库入口；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，创建不可复用 token；数据库 `client-url` 只取 token ID/value，连接主机和端口从 Smart Endpoint 动态读取 SSH `host/ssh_port`；SQL 限制由 JumpServer 侧负责；与 Query 零代码依赖 |
+| `subskills/access/scripts/jms_connect.py` | 当前身份 SSH/多数据库一次性连接信息 | 新增独立入口；数据库支持 PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse，统一使用 Smart Endpoint 的 KoKo SSH `host/ssh_port` |
+| `subskills/access/scripts/jms_ssh_exec.py` | 当前身份同进程 SSH 命令执行 | 一次 token、一次认证、单客户端顺序执行，不通过本地 shell，不跨进程传递凭据 |
+| `subskills/access/scripts/jms_db_exec.py` | 当前身份新增数据库协议命令执行 | PostgreSQL/Redis/MongoDB/SQL Server/Oracle 固定 `db_client`；ClickHouse 固定 `web_cli`；固定 `is_reusable=false`；多命令复用一个 KoKo SSH 交互会话，按协议封装和退出 |
+| `subskills/access/scripts/jms_koko_connection.py` | Access 新增入口共享连接核心 | 集中当前身份资产/账号/协议解析、Smart Endpoint、一次性 token 和 client-url 生命周期 |
 | `subskills/query/scripts/jms_permissions.py` | 授权规则、ACL、RBAC 与资产授权用户查询 | 不承担授权写入 |
 | `subskills/query/scripts/jms_audit.py` | 审计列表、详情、terminal 会话、命令存储提示、能力分析 | 统一承接调查类意图 |
 | `subskills/common/scripts/jms_common.py` | 配置检查、预检、连通性、组织选择、端点验证 | 所有业务 skill 的公共前置能力 |

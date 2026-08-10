@@ -1,6 +1,6 @@
 interface:
   display_name: "JumpServer Skills"
-  short_description: "JumpServer V4.10 主 Skill + 子 Skill。覆盖查询、权限、审计、巡检、当前身份 SSH/MySQL/MariaDB 连接、受控创建和使用报告。"
+  short_description: "JumpServer V4.10 主 Skill。覆盖查询、审计、KoKo SSH/多数据库连接与执行、受控创建和报告。"
   default_prompt: |
     使用 $jumpserver-skills 处理 JumpServer V4.10 请求。
 
@@ -8,14 +8,14 @@ interface:
     - 路由优先级、写操作白名单、组织限制、密文脱敏要求：以 `references/routing-and-safety.md` 为唯一来源。
     - 每条 create 命令的字段、payload 和示例：以 `subskills/create/references/index.md` 及其子文档为准。
     - 查询/巡检/审计 capability 详情：以 `subskills/query/references/` 下的文档为准。
-    - 当前身份一次性 SSH 连接与 token 生命周期：以 `subskills/access/references/ssh-connection.md` 为准。
+    - 当前身份一次性 SSH 连接与 token 生命周期：以 `subskills/access/references/ssh-connection.md` 为准；KoKo 多协议执行以 `subskills/access/references/koko-execution.md` 为准。
     - 本 prompt 只保留路由优先级、阻塞红线、统计口径与执行习惯。
 
     ## 路由优先级（高 -> 低）
     1. 报告 / 使用分析（核心对象是某天 / 某时间段的整体使用数据）-> `jms_report.py daily-usage-prepare` -> Skill 总结 -> `jms_report.py daily-usage-render`。
     2. 配置 / 组织 / 连通性 / 解析 -> `jms_common.py`、`jms_query.py resolve`、`jms_runtime_query.py`。
-    3. 当前身份 SSH（"通过 JumpServer 连接这台机器 / 获取一次性 SSH 信息"）-> Access 子 Skill 的 `python3 subskills/access/scripts/jms_ssh_connect.py connect-info`。
-    4. 当前身份 MySQL/MariaDB（"连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL"）-> Access 子 Skill 的 `python3 subskills/access/scripts/jms_db_connect.py db-query`；读取 `subskills/access/references/database-connection.md`。
+    3. 当前身份 SSH 连接信息或远程命令 -> Access 的 `jms_ssh_connect.py connect-info`、`jms_connect.py connect-info` 或 `jms_ssh_exec.py ssh-exec`。
+    4. 当前身份数据库连接或命令 -> MySQL/MariaDB 用 `jms_db_connect.py db-query`；PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse 用 `jms_connect.py connect-info` 或 `jms_db_exec.py db-exec`；读取 Access references。
     5. 用户有效访问范围（"X 用户能访问哪些资产 / 节点 / 账号 / 协议"）-> Query 子 Skill 的 `python3 subskills/query/scripts/jms_access.py user-assets / user-nodes / user-asset-access`。
     6. 权限关系（"为什么能访问 / 授权规则详情 / 节点授权覆盖 / 资产授权给了谁"）-> `jms_permissions.py`。
     7. 审计调查（明确日期或时间段下的登录 / 会话 / 命令 / 传输明细）-> `jms_audit.py`。
@@ -42,6 +42,8 @@ interface:
     - "某用户能访问哪些资产 / 节点 / 账号 / 协议"（结果型）-> Query 子 Skill 的 `jms_access.py user-assets / user-nodes / user-asset-access`；优先返回 `asset_count + assets`、`node_count + nodes`、`permed_accounts + permed_protocols`，不要退回授权规则说明。
     - "连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息" -> Access 子 Skill 的 `jms_ssh_connect.py connect-info`；只使用当前 API 身份 `users/self`，资产、SSH 协议和 `has_secret=true` 账号必须唯一，显式 `--confirm` 后固定创建 `is_reusable=false` token。
     - "连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL" -> Access 子 Skill 的 `jms_db_connect.py db-query`；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定使用 `db_client` + `is_reusable=false`，SQL 原文交给 JumpServer 侧策略处理；数据库 `client-url` 只取 token ID/value，连接主机和端口从 `/api/v1/terminal/endpoints/smart/?asset_id=...&protocol=ssh` 动态读取 `host/ssh_port`。SSH、MySQL、MariaDB token 的协议和连接方式不同，不能复用，但实际连接传输统一使用该 KoKo SSH `host/ssh_port`。
+    - "通过 JumpServer 执行 SSH 命令" -> `jms_ssh_exec.py ssh-exec`；必须显式 `--confirm`，一次认证、单客户端顺序执行，不调用本地 shell。
+    - "连接或操作 PostgreSQL / Redis / MongoDB / SQL Server / Oracle / ClickHouse" -> `jms_connect.py connect-info` 或 `jms_db_exec.py db-exec`；只使用资产精确授权协议和 `is_reusable=false`；PostgreSQL/Redis/MongoDB/SQL Server/Oracle 固定 `db_client`，ClickHouse 固定 `web_cli`；实际传输统一使用 Smart Endpoint 的 KoKo SSH `host/ssh_port`。`serversql/server-sql/mssql` 归一化为 `sqlserver`。
     - 一次 token 只用于一次 SSH 认证；多条命令复用同一 SSH 会话，断线后重新获取。不得保存原始 `jms_url`、token 或密码；只有 ready 成功结果的 `result.connection.password` 可以在当次响应中明文使用。
     - "在 Default 组织下 / 在某组织下" 是显式组织，不是弱过滤提示；先解析组织 ID，再 `--org-id` 单次命令限定，不要回退成"全组织检查"。中文姓名等显示名先解析用户再用 `user-id` 执行。
     - "为什么能访问 / 依据是什么 / 授权规则 / 权限详情 / 节点授权是否覆盖某资产" -> `jms_permissions.py asset-permission-explain`、`permission-list`、`permission-get`。

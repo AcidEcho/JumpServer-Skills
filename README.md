@@ -1,6 +1,6 @@
 # JumpServer Skills
 
-`jumpserver-skills` 是一个面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、当前身份 SSH/MySQL/MariaDB 连接、模板化使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令；持久业务写入只开放白名单 create 入口，Access 仅允许显式确认后创建不可复用的短生命周期 connection token，create 输出仍会自动脱敏密文字段。
+`jumpserver-skills` 是一个面向 JumpServer V4.10 的自然语言运维 skill 仓库，适用于对象查询、权限回看、审计调查、治理巡检、访问分析、当前身份 KoKo SSH/多数据库连接与执行、模板化使用报告，以及受控的对象创建场景。使用者无需手动拼接脚本命令；持久业务写入只开放白名单 create 入口，Access 仅允许显式确认后创建不可复用的短生命周期 connection token，create 输出仍会自动脱敏密文字段。
 
 [English](./README.en.md)
 
@@ -21,6 +21,8 @@
 | 用户有效访问范围 | “某用户能访问哪些资产/节点/账号/协议” | Query 的 `subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` | 返回 effective access，不创建 connection token |
 | 当前身份一次性 SSH | “通过 JumpServer 连接这台机器” | Access 的 `subskills/access/scripts/jms_ssh_connect.py connect-info` | 必须唯一选择资产/托管账号并显式 `--confirm`，token 固定不可复用 |
 | 当前身份 MySQL/MariaDB SQL 执行 | “连接 10.1.12.224 执行 SHOW DATABASES” | Access 的 `subskills/access/scripts/jms_db_connect.py db-query` | 从资产授权中唯一选择 `mysql` 或 `mariadb`，使用 `db_client` 一次性 token；SQL 原文交给 JumpServer 策略处理，不返回 token password |
+| 当前身份 SSH 命令执行 | “通过 JumpServer 在这台机器执行 hostname” | Access 的 `subskills/access/scripts/jms_ssh_exec.py ssh-exec` | 显式确认后一次认证，多条命令复用同一个 SSH 客户端；不调用本地 shell，不返回一次性密码 |
+| PostgreSQL/Redis/MongoDB/SQL Server/Oracle/ClickHouse | “在 PostgreSQL 执行 SELECT version()”“Redis PING” | Access 的 `jms_connect.py connect-info` / `jms_db_exec.py db-exec` | 精确匹配资产授权协议；PostgreSQL/Redis/MongoDB/SQL Server/Oracle 固定 `db_client`，ClickHouse 固定 `web_cli`；token 固定 `is_reusable=false`，统一走 Smart Endpoint 的 KoKo SSH `host/ssh_port` |
 | 权限关系回看 | “这个资产授权给了谁”“为什么这个用户能访问”“看某条授权规则详情” | `jms_permissions.py` | 区分授权主体、实际可访问者和超级管理员影响，不混淆口径 |
 | 审计调查 | “昨天谁登录失败了”“查某用户会话/命令/文件传输”“分析高危命令” | `jms_audit.py` | 按明确组织和时间窗查询日志、记录、明细或聚合结果 |
 | 治理巡检与访问分析 | “做资产治理巡检”“看组件负载”“分析改密失败”“看访问排行/异常行为” | `jms_inspect.py` / `jms_audit.py` | 使用内置 capability 聚合分析，不要求使用者手工拼零散查询 |
@@ -102,6 +104,8 @@ cp .env.example .env
 | 用户有效访问范围 | “某某用户在 Default 组织下有哪些资产”“某某用户有哪些节点”“某某用户在某资产下有哪些账号和协议” | Query：`subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access` |
 | 当前身份一次性 SSH | “通过 JumpServer 连接 10.1.1.1”“先获取这台机器的 SSH 信息再部署” | Access：`subskills/access/scripts/jms_ssh_connect.py connect-info --confirm` |
 | 当前身份 MySQL/MariaDB SQL 执行 | “连接 10.1.12.224 执行 `SHOW DATABASES;` 或更新语句” | Access：`subskills/access/scripts/jms_db_connect.py db-query --confirm` |
+| 当前身份 SSH 命令执行 | “通过 JumpServer 执行 `hostname` 和 `id -u`” | Access：`subskills/access/scripts/jms_ssh_exec.py ssh-exec --confirm` |
+| 多协议数据库命令执行 | “在 PostgreSQL/Redis/MongoDB/SQL Server/Oracle/ClickHouse 执行命令” | Access：`subskills/access/scripts/jms_db_exec.py db-exec --confirm` |
 | 权限关系回看 | “这台资产授权给了谁”“某某用户为什么能访问某资产”“看这条授权规则详情” | `jms_permissions.py` |
 | 审计调查 | “查最近一周的登录审计”“看某个用户的会话记录和异常中断情况”“导出某天命令记录详情” | `jms_audit.py` |
 | 使用报告 | “看看昨天使用情况”“想看上周谁登录最多”“过一下 3 月上旬哪些资产最活跃” | `jms_report.py` |
@@ -115,6 +119,8 @@ cp .env.example .env
 | “能访问哪些资产 / 节点 / 账号 / 协议” | 用户有效访问范围，返回结果清单 |
 | “连接这台机器 / 通过 JumpServer 登录 / 获取一次性 SSH 信息” | 当前 API 身份 SSH 连接；不代替其他用户签发 token |
 | “连接这台数据库 / 执行 SHOW DATABASES / 执行 SQL” | 当前 API 身份 MySQL/MariaDB `db_client`；不复用 SSH token，SQL 权限由 JumpServer 决定 |
+| “通过 JumpServer 执行远程 SSH 命令” | 当前 API 身份 `ssh-exec`；单次认证、同客户端顺序执行，显式确认后才创建 token |
+| “连接 PostgreSQL/Redis/MongoDB/serversql/Oracle/ClickHouse” | 当前 API 身份 `jms_connect.py` 或 `jms_db_exec.py`；所有数据库连接统一走 KoKo SSH Smart Endpoint |
 | “为什么能访问 / 授权规则详情 / 权限依据” | 权限关系回看，解释授权来源 |
 | “这台资产授权给了谁 / 谁被授权到这台资产” | 默认回答授权主体，不默认把超级管理员算进去 |
 | “某天登录情况 / 会话概览 / 谁最多 / 哪些最活跃” | 使用报告或使用分析 |
@@ -179,6 +185,7 @@ create 的组织规则不在 README 重复展开。需要记住的边界是：�
 | 查询、有效访问、权限、审计、巡检怎么路由 | [intent-routing.md](./subskills/query/references/intent-routing.md)、[routing-playbook.md](./subskills/query/references/routing-playbook.md)、[capabilities.md](./subskills/query/references/capabilities.md) | Query 二次意图分类、触发词、能力目录、阻塞规则与反例 |
 | Access 一次性 SSH 怎么创建和使用 | [ssh-connection.md](./subskills/access/references/ssh-connection.md) | `connect-info`、`users/self`、确认门槛、API 流程、token 生命周期和安全边界 |
 | Access MySQL/MariaDB 怎么连接和执行 SQL | [database-connection.md](./subskills/access/references/database-connection.md) | `db-query`、协议自动选择、`db_client` token、Smart Endpoint 动态 SSH `host/ssh_port`、JumpServer SQL 策略和 token 生命周期 |
+| Access SSH 和多数据库怎么连接、执行 | [koko-execution.md](./subskills/access/references/koko-execution.md) | `jms_connect.py`、`ssh-exec`、`db-exec`、协议别名、命令封装、Smart Endpoint 和凭据生命周期 |
 | 组件负载与改密失败分析 | [component-load-and-password-report.md](./subskills/query/references/component-load-and-password-report.md) | 指标字段、负载阈值、失败识别和统计口径 |
 | 使用报告怎么生成 | [subskills/query/references/report-template-playbook.md](./subskills/query/references/report-template-playbook.md) | 模板化报告流程、时间范围、组织优先级 |
 | 对象查询和权限审计细节 | [assets.md](./subskills/query/references/assets.md)、[permissions.md](./subskills/query/references/permissions.md)、[audit.md](./subskills/query/references/audit.md)、[diagnose.md](./subskills/query/references/diagnose.md) | 资产/账号/用户/节点查询、授权关系、日志审计、治理诊断 |

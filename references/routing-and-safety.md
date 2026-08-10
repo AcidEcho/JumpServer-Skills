@@ -9,6 +9,8 @@
 | 配置、预检、组织选择、连通性、端点验证 | `subskills/common/` | `python3 subskills/common/scripts/jms_common.py ...` |
 | 当前身份一次性 SSH 连接信息 | `subskills/access/` | `python3 subskills/access/scripts/jms_ssh_connect.py connect-info ...` |
 | 当前身份 MySQL/MariaDB SQL 执行 | `subskills/access/` | `python3 subskills/access/scripts/jms_db_connect.py db-query ...` |
+| 当前身份多协议连接信息与 SSH 命令执行 | `subskills/access/` | `jms_connect.py connect-info` / `jms_ssh_exec.py ssh-exec` |
+| PostgreSQL/Redis/MongoDB/SQL Server/Oracle/ClickHouse 命令执行 | `subskills/access/` | `jms_db_exec.py db-exec ...` |
 | 用户有效访问范围、对象、权限、审计、报告、巡检、只读运行时数据 | `subskills/query/` | `python3 subskills/query/scripts/jms_access.py user-assets/user-nodes/user-asset-access ...` 或其他 Query 正式入口 |
 | 创建用户、用户组、组织、邀请、标签、节点、资产、网域、网关、账号模板、账号绑定、ACL、资产授权、数据脱敏规则 | `subskills/create/` | 完整命令索引见 `subskills/create/references/index.md`；写入规则见下方“允许写操作”表 |
 | 更新类 | `subskills/update/` | 本版无可执行写操作 |
@@ -29,6 +31,9 @@
 | 当前组织切换 | `jms_common.py select-org --confirm` | 只写 `.env JMS_ORG_ID` |
 | 当前身份一次性 SSH connection token | `jms_ssh_connect.py connect-info --confirm` | 只使用 `users/self`；资产、SSH 协议、托管凭据账号必须唯一；固定 `is_reusable=false`；不返回原始 `jms_url`，不持久化 token 或密码 |
 | 当前身份 MySQL/MariaDB SQL 执行 connection token | `jms_db_connect.py db-query --confirm` | 只使用 `users/self` 数据库资产；从资产授权中唯一选择 `mysql` 或 `mariadb` 协议，固定 `db_client` + `is_reusable=false`；SQL 不在本地解析、改写或阻塞，由 JumpServer 命令过滤、连接 ACL 和数据库权限决定；不返回或持久化 token password；数据库 `client-url` 只取 token ID/value，SSH 主机和端口从 `/api/v1/terminal/endpoints/smart/` 动态读取 `host/ssh_port` |
+| 当前身份多协议一次性 connection token | `jms_connect.py connect-info --confirm` | 只使用 `users/self`；资产协议和托管账号必须唯一；SSH 使用允许的 SSH 连接方式；PostgreSQL/Redis/MongoDB/SQL Server/Oracle 固定 `db_client`，ClickHouse 固定 `web_cli`；固定 `is_reusable=false`，只有 ready 的 `result.connection.password` 可用于当次连接 |
+| 当前身份 SSH 命令执行 connection token | `jms_ssh_exec.py ssh-exec --confirm` | 只使用 `users/self` 和 SSH 协议；一次认证，在同一个 Paramiko 客户端顺序执行重复 `--command`；不调用本地 shell，不输出或持久化一次性密码 |
+| 当前身份新增数据库协议命令执行 connection token | `jms_db_exec.py db-exec --confirm` | 只支持 PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse；资产必须精确授权协议；前五种协议必须允许 `db_client`，ClickHouse 必须允许 `web_cli`；固定 `is_reusable=false`，统一动态读取 Smart Endpoint 的 KoKo SSH `host/ssh_port`；不输出或持久化一次性密码 |
 | 创建用户 | `jms_create_user.py create-user --confirm` | 密文字段或密文语义字段脱敏；唯一性冲突由服务端校验返回 |
 | 创建用户组 | `jms_create_user_group.py create-user-group --confirm` | 成员只接受用户 ID；唯一性冲突由服务端校验返回 |
 | 创建组织 | `jms_create_org.py create-organization --confirm` | 请求不带 `X-JMS-ORG`，成功后不切换当前组织 |
@@ -58,6 +63,7 @@
 | 代替其他用户创建 token、创建可复用 token、绕过审批/Face Verify/ACL | 不开放 |
 | 数据库 token 复用 SSH token，或绕过 Smart Endpoint 猜测主机/端口 | 不开放；按 Access 数据库连接 reference 使用数据库 token 的 `JMS-<client-token-id>`，并动态读取 SSH `host/ssh_port` |
 | 绕过 JumpServer 数据库命令过滤、连接 ACL 或服务端拒绝 | 不开放；`db-query` 只负责透传 SQL，不提供本地绕过能力 |
+| 为新增数据库协议写死 Magnus/数据库端口、覆盖 Smart Endpoint 或跨进程复用凭据 | 不开放；`jms_connect.py` 和 `jms_db_exec.py` 只使用动态 KoKo SSH `host/ssh_port`，凭据仅在当前进程内存中使用 |
 | 对象更新、删除、解锁 | 不开放 |
 | 资产、账号、节点、网域、网关、账号模板等对象创建 | 只开放上表列出的 create 入口 |
 | 授权类创建 | 只开放上表列出的命令过滤规则、登录控制、连接方式过滤器、资产授权规则、资产连接规则和数据脱敏过滤规则创建 |

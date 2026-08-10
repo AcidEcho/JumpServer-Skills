@@ -17,6 +17,8 @@ python3 subskills/access/scripts/jms_ssh_connect.py connect-info \
   --confirm
 ```
 
+需要在同一进程内直接执行远程命令时，使用 `jms_ssh_exec.py ssh-exec`；多协议连接与执行细节见 [KoKo 多协议连接与命令执行](koko-execution.md)。原 `jms_ssh_connect.py connect-info` 保持兼容。
+
 资产选择器 `--asset-id`、`--asset-name`、`--asset-address` 必须且只能提供一个。`--account` 接受账号 ID、alias、名称或用户名；只有一个可用托管凭据账号时可省略。
 
 ## API 流程

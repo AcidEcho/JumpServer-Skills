@@ -1,9 +1,10 @@
 interface:
   display_name: "JumpServer Access"
-  short_description: "获取当前 API 身份的一次性 JumpServer SSH 或 MySQL/MariaDB db_client 连接。"
+  short_description: "获取当前身份一次性 KoKo 连接，执行 SSH 或多种数据库命令。"
   default_prompt: |
-    使用 $jumpserver-access 为当前 API 身份获取授权资产的一次性 SSH 连接信息，或通过 MySQL/MariaDB `db_client` 连接数据库资产执行 SQL。SQL 不在本地做语句类型、数量或关键字限制；JumpServer 负责命令过滤、连接方式 ACL 和数据库权限。用户有效访问范围必须转到 $jumpserver-query 的 `user-assets / user-nodes / user-asset-access`。
-    SSH 从仓库根目录执行 `python3 subskills/access/scripts/jms_ssh_connect.py connect-info ...`；MySQL/MariaDB 执行 `python3 subskills/access/scripts/jms_db_connect.py db-query ...`。若本目录被独立注册且 cwd 位于本目录，使用 `python3 scripts/<entry>.py ...`。Access 不依赖 Query；两者不得互相导入或加载，只共享 sibling Common。完整仓库仍需保留以加载 Common。
+    使用 $jumpserver-access 为当前 API 身份获取授权资产的一次性 SSH/数据库连接信息，或执行 SSH、MySQL/MariaDB、PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse 命令。用户有效访问范围必须转到 $jumpserver-query 的 `user-assets / user-nodes / user-asset-access`。
+    兼容入口是 `jms_ssh_connect.py connect-info` 和 `jms_db_connect.py db-query`；新增入口是 `jms_connect.py connect-info`、`jms_ssh_exec.py ssh-exec`、`jms_db_exec.py db-exec`。从仓库根目录使用 `python3 subskills/access/scripts/<entry>.py ...`；独立注册且 cwd 位于本目录时使用 `python3 scripts/<entry>.py ...`。
     `connect-info` 只使用 `users/self`，必须唯一选择资产、SSH 协议和 `has_secret=true` 账号；未显式 `--confirm` 时不得创建 token。一次 token 只用于一次 SSH 认证，多条命令复用同一会话，断线后重新获取；不得缓存或记录密码、token、原始 `jms_url`。
     `db-query` 只使用 `users/self` 和数据库资产；从资产授权中选择 `mysql` 或 `mariadb` 协议，两者同时存在时按资产平台自动匹配，仍无法区分才要求 `--protocol`；固定使用 `db_client` 和 `is_reusable=false`。SQL 原文交给 JumpServer，必须显式 `--confirm`。数据库 `client-url` 只用于取得 token ID/value；连接主机和端口从 `/api/v1/terminal/endpoints/smart/?asset_id=...&protocol=ssh` 动态读取 `host/ssh_port`，使用 `JMS-<client-token-id>` 认证；不写死端口，不提供主机/端口覆盖参数。SSH、MySQL、MariaDB token 的协议和连接方式不同，不能复用，但实际连接传输统一使用该 KoKo SSH `host/ssh_port`。
+    `ssh-exec` 在同一进程创建一次 token、认证一次并按顺序执行重复 `--command`；不把命令交给本地 shell。`jms_connect.py` 和 `db-exec` 支持 PostgreSQL、Redis、MongoDB、SQL Server、Oracle、ClickHouse；前五种协议固定使用 `db_client`，ClickHouse 固定使用 `web_cli`。所有数据库统一通过 Smart Endpoint 返回的 KoKo SSH `host/ssh_port` 连接。`serversql/server-sql/mssql` 仅归一化为资产协议 `sqlserver`。
     只有 ready 结果中的 `result.connection.password` 可以用于当次连接；其他密文字段和所有错误输出必须脱敏。权限原因转到 query 的 `jms_permissions.py`。
